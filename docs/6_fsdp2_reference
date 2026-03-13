@@ -1,0 +1,1403 @@
+# FSDP2 in HuggingFace Accelerate: Living Reference & Contribution Guide
+
+> **Purpose:** Working reference for understanding, using, and contributing FSDP2 features to the
+> HuggingFace Accelerate codebase. Updated as features land or gaps are identified.
+>
+> **Upstream sources consulted:**
+> - PyTorch official FSDP2 tutorial: https://docs.pytorch.org/tutorials/intermediate/FSDP_tutorial.html
+> - PyTorch `fully_shard` API docs: https://docs.pytorch.org/docs/stable/distributed.fsdp.fully_shard.html
+> - PyTorch canonical examples: https://github.com/pytorch/examples/tree/main/distributed/FSDP2
+> - Accelerate concept guide: https://huggingface.co/docs/accelerate/en/concept_guides/fsdp1_vs_fsdp2
+>
+> **Last reviewed:** March 2026
+
+---
+
+## Contents
+
+1. [What FSDP2 Is and Why It Matters for Accelerate](#1-what-fsdp2-is-and-why-it-matters-for-accelerate)
+2. [PyTorch FSDP2 API: Complete Reference](#2-pytorch-fsdp2-api-complete-reference)
+3. [Accelerate FSDP2 Surface: What Is Implemented](#3-accelerate-fsdp2-surface-what-is-implemented)
+4. [Configuration Reference](#4-configuration-reference)
+5. [Model Initialization Patterns](#5-model-initialization-patterns)
+6. [Prefetching: Implicit and Explicit](#6-prefetching-implicit-and-explicit)
+7. [Mixed Precision Policy](#7-mixed-precision-policy)
+8. [Gradient Clipping and Optimizer Interaction](#8-gradient-clipping-and-optimizer-interaction)
+9. [Gradient Accumulation](#9-gradient-accumulation)
+10. [Checkpointing: DTensor APIs vs DCP APIs](#10-checkpointing-dtensor-apis-vs-dcp-apis)
+11. [CPU Offload](#11-cpu-offload)
+12. [FP8 All-Gather](#12-fp8-all-gather)
+13. [DeviceMesh and Multi-Dimensional Parallelism](#13-devicemesh-and-multi-dimensional-parallelism)
+14. [FSDP1-to-FSDP2 Migration](#14-fsdp1-to-fsdp2-migration)
+15. [Known Gaps and Open Issues](#15-known-gaps-and-open-issues)
+16. [Contribution Targets (Prioritized)](#16-contribution-targets-prioritized)
+17. [Test Coverage Map](#17-test-coverage-map)
+18. [Quick Diagnostic Checklist](#18-quick-diagnostic-checklist)
+
+---
+
+## 1. What FSDP2 Is and Why It Matters for Accelerate
+
+FSDP2 is PyTorch's current fully sharded data parallel implementation, exposed through
+`torch.distributed.fsdp.fully_shard`. It replaces the class-based `FullyShardedDataParallel`
+(now called FSDP1, which is officially deprecated as of PyTorch 2.x).
+
+The fundamental difference: FSDP1 concatenates all parameters of a wrapped module into a
+single flat 1D tensor (`FlatParameter`) and shards that. FSDP2 shards each parameter
+individually as a `DTensor` (Distributed Tensor) split on `dim=0`. The implications flow
+through the entire stack: state dicts, mixed precision, optimizer interaction, LoRA/PEFT
+compatibility, and memory management all behave differently.
+
+For Accelerate as a library, FSDP2 matters because:
+
+- The HuggingFace ecosystem (Transformers `Trainer`, TRL, PEFT) runs on top of Accelerate. FSDP2 unblocks correct QLoRA fine-tuning, FP8 all-gather, and per-layer mixed precision without workarounds.
+- PyTorch's own recommendation is to migrate everything to FSDP2. FSDP1 will not receive new features.
+- Accelerate's FSDP2 integration (added in ~v0.34) is newer and has known gaps compared to the mature FSDP1 path. This is where contributor leverage is highest.
+
+---
+
+## 2. PyTorch FSDP2 API: Complete Reference
+
+This section documents every public symbol in the FSDP2 API. Accelerate wraps these; understanding the raw API is prerequisite to reading Accelerate's wrapping code.
+
+### `torch.distributed.fsdp.fully_shard`
+
+```python
+from torch.distributed.fsdp import fully_shard
+
+fully_shard(
+    module: nn.Module,
+    *,
+    mesh: Optional[DeviceMesh] = None,
+    reshard_after_forward: Union[bool, int] = True,
+    mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
+    offload_policy: OffloadPolicy = OffloadPolicy(),
+) -> nn.Module
+```
+
+**What it does, step by step:**
+
+1. Converts `module.parameters()` from `torch.Tensor` to `DTensor` in-place. Each parameter becomes `DTensor` with placement `Shard(dim=0)` across the `mesh`.
+2. "Unions" the module type in-place: `type(module)` becomes `FSDP{OriginalClassName}`, which is simultaneously `OriginalClassName` and `FSDPModule`. All original methods are preserved.
+3. Registers pre-forward and post-forward hooks for all-gather / reshard cycles.
+4. Registers pre-backward and post-backward hooks for the backward all-gather and reduce-scatter.
+5. Moves the module to the target device according to the mesh's device type.
+
+**Key behaviors:**
+
+- Must be called bottom-up: apply to sub-modules first, root last.
+- Calling `model.forward(x)` bypasses hooks. Always call `model(x)`.
+- The optimizer must be constructed after all `fully_shard` calls, so it holds references to `DTensor` parameters, not the original `torch.Tensor` objects.
+
+**`reshard_after_forward`:**
+
+| Value | Behavior | FSDP1 Equivalent |
+|---|---|---|
+| `True` | Free unsharded params after forward; re-gather before backward | `FULL_SHARD` |
+| `False` | Keep unsharded params after forward (use in backward without re-gather) | `SHARD_GRAD_OP` |
+| `int` (e.g., `world_size`) | Reshard to a different mesh size after forward | HSDP-like behavior |
+
+### `torch.distributed.fsdp.FSDPModule`
+
+The mixin added in-place to every module that has been sharded. All methods below are available on any sharded module.
+
+```python
+from torch.distributed.fsdp import FSDPModule
+
+# Check if a module has been sharded
+isinstance(model, FSDPModule)  # True after fully_shard(model)
+
+# Manual all-gather (unshard all parameters)
+model.unshard(async_op: bool = False)
+
+# Manual reshard (free unsharded copy, restore DTensor state)
+model.reshard()
+
+# Gradient accumulation: disable reduce-scatter for intermediate steps
+model.set_requires_gradient_sync(requires_gradient_sync: bool, recurse: bool = True)
+
+# Explicit prefetch control
+model.set_modules_to_forward_prefetch(modules: List[FSDPModule])
+model.set_modules_to_backward_prefetch(modules: List[FSDPModule])
+
+# Post-forward reshard group (advanced: share communication group with siblings)
+model.set_post_forward_mesh(mesh: DeviceMesh)
+```
+
+### `torch.distributed.fsdp.MixedPrecisionPolicy`
+
+```python
+from torch.distributed.fsdp import MixedPrecisionPolicy
+
+MixedPrecisionPolicy(
+    param_dtype: Optional[torch.dtype] = None,
+    # dtype for all-gather (communication dtype)
+    # None = use the parameter's natural dtype
+
+    reduce_dtype: Optional[torch.dtype] = None,
+    # dtype for reduce-scatter (gradient communication dtype)
+    # None = use param_dtype if set, else natural dtype
+
+    output_dtype: Optional[torch.dtype] = None,
+    # cast module output to this dtype after forward
+    # None = no cast
+
+    cast_forward_inputs: bool = True,
+    # whether to cast module inputs to param_dtype before forward
+)
+```
+
+Note: `MixedPrecisionPolicy` is distinct from FSDP1's `MixedPrecision`. The new class is simpler, has no `buffer_dtype` field (buffers are handled separately), and correctly handles per-module dtype assignment.
+
+### `torch.distributed.fsdp.CPUOffloadPolicy`
+
+```python
+from torch.distributed.fsdp import CPUOffloadPolicy
+
+CPUOffloadPolicy(
+    offload_params: bool = True,
+    # whether to offload parameters to CPU when not in use
+
+    pin_memory: bool = True,
+    # whether to use pinned (page-locked) CPU memory
+    # pinned memory enables faster CPU->GPU transfer via DMA
+)
+```
+
+### `torch.distributed.fsdp.OffloadPolicy`
+
+The base class. Use `CPUOffloadPolicy` for CPU offload; use `OffloadPolicy()` (default, no-op) for no offload.
+
+### `DeviceMesh` integration
+
+FSDP2 is mesh-native. Every `fully_shard` call accepts an optional `mesh` argument. If `None`, FSDP2 uses a default 1D mesh over all available ranks.
+
+```python
+from torch.distributed.device_mesh import init_device_mesh
+
+# Simple 1D data parallel mesh (default behavior)
+mesh_1d = init_device_mesh("cuda", (world_size,))
+
+# 2D mesh for Hybrid Sharded Data Parallel (HSDP)
+# Dim 0 = replicate (inter-node DDP), Dim 1 = shard (intra-node FSDP)
+mesh_2d = init_device_mesh(
+    "cuda",
+    (num_nodes, gpus_per_node),
+    mesh_dim_names=("replicate", "shard"),
+)
+
+# 3D mesh for FSDP + Tensor Parallel
+mesh_3d = init_device_mesh(
+    "cuda",
+    (dp, tp, cp),
+    mesh_dim_names=("dp", "tp", "cp"),
+)
+```
+
+---
+
+## 3. Accelerate FSDP2 Surface: What Is Implemented
+
+This section maps each PyTorch FSDP2 feature to its Accelerate counterpart, and marks the implementation status.
+
+| PyTorch FSDP2 Feature | Accelerate Abstraction | Status |
+|---|---|---|
+| `fully_shard` bottom-up wrapping | `accelerator.prepare(model)` with `fsdp_version=2` | Implemented |
+| `reshard_after_forward` (bool) | `fsdp_reshard_after_forward: true/false` in YAML | Implemented |
+| `MixedPrecisionPolicy` | `mixed_precision: bf16` in YAML or direct plugin field | Implemented |
+| `CPUOffloadPolicy` | `fsdp_offload_params: true` in YAML | Implemented |
+| DCP sharded checkpointing | `accelerator.save_state()` / `load_state()` | Implemented |
+| `TRANSFORMER_BASED_WRAP` policy | `fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP` | Implemented |
+| `SIZE_BASED_WRAP` policy | `fsdp_auto_wrap_policy: SIZE_BASED_WRAP` | Implemented |
+| CPU RAM-efficient loading | `fsdp_cpu_ram_efficient_loading: true` | Implemented |
+| Activation checkpointing | `fsdp_activation_checkpointing: true` | Partial (see §15) |
+| FP8 all-gather (TorchAO) | `enable_fsdp_float8_all_gather: true` | Implemented (experimental) |
+| Explicit prefetching | Not exposed | **Missing** |
+| 2D mesh (HSDP) | Via `ParallelismConfig` | Partial |
+| `set_requires_gradient_sync` | Internal use in `accumulate()` | Implemented |
+| `ignored_params` (per-param freeze) | Not exposed | **Missing** |
+| Async checkpointing | Not exposed | **Missing** |
+| `model.unshard()` / `model.reshard()` | Not exposed to user | **Missing** |
+| `accelerate to-fsdp2` CLI | Implemented | Implemented (partial field coverage) |
+| `output_dtype` in mp_policy | Not exposed | **Missing** |
+| `cast_forward_inputs` | Not exposed | **Missing** |
+
+---
+
+## 4. Configuration Reference
+
+### YAML Config (complete FSDP2 example)
+
+```yaml
+compute_environment: LOCAL_MACHINE
+distributed_type: FSDP
+fsdp_config:
+  # --- Version (required) ---
+  fsdp_version: 2
+
+  # --- Sharding ---
+  fsdp_reshard_after_forward: true        # true = FULL_SHARD, false = SHARD_GRAD_OP
+                                          # FSDP1's fsdp_sharding_strategy is IGNORED in FSDP2
+
+  # --- Wrapping ---
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP   # or SIZE_BASED_WRAP or NO_WRAP
+  fsdp_transformer_layer_cls_to_wrap: LlamaDecoderLayer  # comma-sep for multiple
+
+  # --- Memory ---
+  fsdp_offload_params: false              # true = CPUOffloadPolicy
+  fsdp_cpu_ram_efficient_loading: true    # load on rank 0, broadcast to others
+
+  # --- Checkpointing ---
+  fsdp_state_dict_type: SHARDED_STATE_DICT  # recommended; FULL_STATE_DICT also supported
+
+  # --- Mixed Precision (set separately or via top-level mixed_precision) ---
+  # See Section 7 for detail
+
+  # --- Activation Checkpointing ---
+  fsdp_activation_checkpointing: false
+
+  # --- FSDP1 options that are REMOVED in FSDP2 ---
+  # fsdp_sharding_strategy: (ignored, use fsdp_reshard_after_forward)
+  # fsdp_backward_prefetch: (removed; BACKWARD_PRE is always used internally)
+  # fsdp_forward_prefetch: (not yet implemented in FSDP2 path)
+  # fsdp_sync_module_states: (removed; handled automatically by cpu_ram_efficient_loading)
+  # fsdp_use_orig_params: (removed; FSDP2 always uses original params via DTensor)
+
+mixed_precision: bf16
+num_processes: 4
+```
+
+### Python API Config
+
+```python
+from accelerate import Accelerator
+from accelerate.utils import FullyShardedDataParallelPlugin
+from torch.distributed.fsdp import MixedPrecisionPolicy, CPUOffloadPolicy
+import torch
+
+plugin = FullyShardedDataParallelPlugin(
+    fsdp_version=2,
+
+    # Sharding
+    reshard_after_forward=True,            # bool only in FSDP2
+
+    # Wrapping (string or callable)
+    auto_wrap_policy="TRANSFORMER_BASED_WRAP",
+    # or pass a callable directly:
+    # auto_wrap_policy=my_custom_policy_fn,
+
+    # Mixed precision
+    mixed_precision_policy=MixedPrecisionPolicy(
+        param_dtype=torch.bfloat16,
+        reduce_dtype=torch.float32,
+    ),
+
+    # Offload
+    cpu_offload=False,                     # or CPUOffloadPolicy(offload_params=True)
+
+    # Checkpointing
+    state_dict_type="SHARDED_STATE_DICT",
+
+    # RAM-efficient loading
+    cpu_ram_efficient_loading=True,
+)
+
+accelerator = Accelerator(fsdp_plugin=plugin)
+```
+
+### FSDP1 vs FSDP2 Config Translation Table
+
+| FSDP1 Field | FSDP2 Equivalent | Notes |
+|---|---|---|
+| `fsdp_sharding_strategy: FULL_SHARD` | `fsdp_reshard_after_forward: true` | |
+| `fsdp_sharding_strategy: SHARD_GRAD_OP` | `fsdp_reshard_after_forward: false` | |
+| `fsdp_sharding_strategy: HYBRID_SHARD` | Use 2D mesh via `ParallelismConfig` | Different mechanism |
+| `fsdp_backward_prefetch: BACKWARD_PRE` | Removed; always active | |
+| `fsdp_backward_prefetch: NO_PREFETCH` | No equivalent; cannot disable | |
+| `fsdp_forward_prefetch: true` | Not yet implemented | |
+| `fsdp_sync_module_states: true` | Removed; automatic with `cpu_ram_efficient_loading` | |
+| `fsdp_use_orig_params: true` | Removed; always true via DTensor | |
+| `fsdp_state_dict_type: LOCAL_STATE_DICT` | Obsolete; use `SHARDED_STATE_DICT` | |
+| `MixedPrecision(param_dtype=...)` | `MixedPrecisionPolicy(param_dtype=...)` | Different class |
+| `MixedPrecision(buffer_dtype=...)` | No direct equivalent | Handle buffers manually |
+
+### CLI Migration Tool
+
+```bash
+# Convert existing FSDP1 config to FSDP2
+accelerate to-fsdp2 --config_file fsdp1_config.yaml --output_file fsdp2_config.yaml
+
+# Overwrite in place
+accelerate to-fsdp2 --config_file config.yaml --overwrite
+```
+
+---
+
+## 5. Model Initialization Patterns
+
+### Pattern 1: Standard (Model Already in GPU Memory)
+
+Use when the model fits in CPU RAM on at least one machine before sharding.
+
+```python
+from accelerate import Accelerator
+from accelerate.utils import FullyShardedDataParallelPlugin
+from transformers import AutoModelForCausalLM
+
+plugin = FullyShardedDataParallelPlugin(fsdp_version=2, reshard_after_forward=True)
+accelerator = Accelerator(fsdp_plugin=plugin)
+
+# Load on rank 0 only, other ranks get meta tensors
+with accelerator.main_process_first():
+    model = AutoModelForCausalLM.from_pretrained(
+        "meta-llama/Llama-3-8B",
+        low_cpu_mem_usage=True,
+    )
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+
+# CRITICAL: pass model and optimizer together
+model, optimizer, dataloader = accelerator.prepare(model, optimizer, dataloader)
+```
+
+### Pattern 2: Meta Device Initialization (Recommended for 70B+ models)
+
+Never instantiates the full model in CPU RAM. Parameters are on meta device (no actual
+memory) until FSDP2 shards and materializes them on-device.
+
+```python
+from torch.nn import init as nn_init
+from accelerate import init_empty_weights
+
+# Create model structure on meta device: zero memory allocated
+with init_empty_weights():
+    model = MyTransformer(config)
+
+# prepare() calls fully_shard which moves meta tensors to GPU shards
+# then calls model.to_empty(device="cuda") + model.reset_parameters()
+# to materialize the shards with real (random) values
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+model, optimizer = accelerator.prepare(model, optimizer)
+
+# Load pre-trained weights after sharding:
+accelerator.load_state("./pretrained_checkpoint/")
+```
+
+### Pattern 3: PyTorch-Native fully_shard (No Accelerate Wrapping)
+
+Useful for benchmarking or when you need direct control over every FSDP2 detail.
+
+```python
+import torch
+import torch.distributed as dist
+from torch.distributed.fsdp import fully_shard, FSDPModule, MixedPrecisionPolicy
+from torch.distributed.device_mesh import init_device_mesh
+
+dist.init_process_group(backend="nccl")
+device = torch.device(f"cuda:{dist.get_rank()}")
+torch.cuda.set_device(device)
+
+mesh = init_device_mesh("cuda", (dist.get_world_size(),))
+
+mp_policy = MixedPrecisionPolicy(
+    param_dtype=torch.bfloat16,
+    reduce_dtype=torch.float32,
+)
+
+# Bottom-up: sub-modules first
+model = MyTransformer(config).to(device)
+for layer in model.layers:
+    fully_shard(layer, mesh=mesh, mp_policy=mp_policy, reshard_after_forward=True)
+fully_shard(model, mesh=mesh, mp_policy=mp_policy, reshard_after_forward=True)
+
+# Verify sharding
+for name, param in model.named_parameters():
+    assert isinstance(param, DTensor), f"{name} is not sharded"
+    assert param.placements == (Shard(0),)
+    print(f"{name}: local shape {param.to_local().shape}")
+
+# Optimizer after sharding
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+```
+
+### Verifying the Type Union
+
+After `fully_shard`, inspect what the model became:
+
+```python
+from torch.distributed.fsdp import FSDPModule
+
+print(type(model))
+# <class 'FSDPMyTransformer'>  -- joint class
+
+print(isinstance(model, MyTransformer))   # True
+print(isinstance(model, FSDPModule))      # True
+
+# FSDPModule-specific methods are now available:
+model.unshard()    # manually trigger all-gather
+model.reshard()    # manually free unsharded copy
+```
+
+---
+
+## 6. Prefetching: Implicit and Explicit
+
+### Implicit Prefetching (Default, No Config Required)
+
+FSDP2 automatically overlaps the next layer's all-gather with the current layer's compute.
+The CPU thread issues all-gather for layer `i+1` while the GPU runs layer `i`.
+
+```
+CPU thread:   issue AG[0]  issue AG[1]  issue AG[2]  ...
+GPU compute:             compute[0]   compute[1]   compute[2]  ...
+Overlap:                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+This is enabled by default in both PyTorch and Accelerate. No configuration needed.
+
+In Accelerate, implicit prefetching activates as soon as `fsdp_version: 2` is set. The old
+`fsdp_backward_prefetch_policy: BACKWARD_PRE` is not needed and is silently ignored.
+
+### Explicit Prefetching (Not Yet Exposed in Accelerate)
+
+For CPU-bound workloads or when you want to prefetch more than one layer at a time, use the
+`FSDPModule` methods directly. These are currently not exposed through `FullyShardedDataParallelPlugin`.
+
+```python
+# After accelerator.prepare(), model is already an FSDPModule
+from torch.distributed.fsdp import FSDPModule
+
+# Get the sharded model (not the Accelerate wrapper)
+fsdp_model = accelerator.unwrap_model(model)
+
+# Configure forward prefetching: each layer prefetches 2 layers ahead
+num_to_prefetch = 2
+for i, layer in enumerate(fsdp_model.layers):
+    if i >= len(fsdp_model.layers) - num_to_prefetch:
+        break
+    layer.set_modules_to_forward_prefetch([
+        fsdp_model.layers[i + j]
+        for j in range(1, num_to_prefetch + 1)
+    ])
+
+# Configure backward prefetching: each layer prefetches 2 layers ahead (reversed)
+for i, layer in enumerate(fsdp_model.layers):
+    if i < num_to_prefetch:
+        continue
+    layer.set_modules_to_backward_prefetch([
+        fsdp_model.layers[i - j]
+        for j in range(1, num_to_prefetch + 1)
+    ])
+
+# Issue first all-gather early (before input preparation)
+fsdp_model.unshard()
+
+# Training loop
+for batch in dataloader:
+    outputs = model(**batch)   # NOT model.forward(**batch)
+    ...
+```
+
+**Contribution note:** Exposing explicit prefetching as a `FullyShardedDataParallelPlugin`
+field is a clear gap. See §16 for a design sketch.
+
+---
+
+## 7. Mixed Precision Policy
+
+### Recommended Configuration for LLM Fine-tuning
+
+```python
+from torch.distributed.fsdp import MixedPrecisionPolicy
+import torch
+
+# Standard production config:
+# - bf16 all-gather saves 50% communication bandwidth vs fp32
+# - fp32 reduce-scatter prevents gradient precision loss at large scale
+mp_policy = MixedPrecisionPolicy(
+    param_dtype=torch.bfloat16,
+    reduce_dtype=torch.float32,
+)
+```
+
+### Per-Layer Mixed Precision (PyTorch Native Only)
+
+PyTorch's `fully_shard` supports setting different policies per module. Accelerate does not
+yet expose this directly; it applies the same policy to all wrapped modules.
+
+```python
+# Directly with PyTorch (not available via Accelerate plugin yet):
+for i, layer in enumerate(model.layers):
+    if i < 4:
+        # First 4 layers: full fp32 (sensitive layers)
+        mp = MixedPrecisionPolicy(param_dtype=torch.float32)
+    else:
+        # Remaining layers: bf16 communication
+        mp = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+        )
+    fully_shard(layer, mp_policy=mp)
+fully_shard(model)
+```
+
+### Inspecting Parameter Dtypes
+
+```python
+# Sharded parameters are stored in their "rest" dtype (not the communication dtype)
+for name, param in model.named_parameters():
+    print(f"{name}: storage dtype = {param.dtype}")
+    # With param_dtype=bfloat16, these are still float32 at rest
+    # They get cast to bfloat16 during the all-gather
+
+# To see the communication dtype, inspect after unshard:
+model.unshard()
+for name, param in model.named_parameters(recurse=False):
+    print(f"{name}: unsharded dtype = {param.dtype}")  # bfloat16
+model.reshard()
+```
+
+### Buffer Handling
+
+`MixedPrecisionPolicy` has no `buffer_dtype` field (unlike FSDP1's `MixedPrecision`).
+Buffers (e.g., `BatchNorm` running statistics, sinusoidal position encodings) must be cast
+manually if needed:
+
+```python
+# Cast all buffers to bf16 before prepare()
+for name, buf in model.named_buffers():
+    buf.data = buf.data.to(torch.bfloat16)
+```
+
+---
+
+## 8. Gradient Clipping and Optimizer Interaction
+
+### Why It Just Works
+
+After `fully_shard`, `model.parameters()` returns `DTensor` objects. Both
+`torch.optim.AdamW` and `torch.nn.utils.clip_grad_norm_` have been made DTensor-aware in
+PyTorch. They dispatch correctly to distributed operations internally.
+
+```python
+# All of these work correctly with DTensor params after FSDP2 sharding:
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
+
+# In training loop:
+loss.backward()
+torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+optimizer.step()
+optimizer.zero_grad()
+```
+
+The `clip_grad_norm_` call issues an all-reduce internally to compute the global gradient
+norm across ranks, then clips each rank's local shard. You do not need to do anything
+special.
+
+### Optimizer State Inspection
+
+```python
+# Optimizer states are also DTensors after FSDP2
+state = optimizer.state[next(model.parameters())]
+print(type(state['exp_avg']))   # DTensor
+print(state['exp_avg'].placements)  # (Shard(0),)
+
+# Get the local shard of the first-moment buffer:
+print(state['exp_avg'].to_local().shape)
+```
+
+### Creating the Optimizer Before vs After Sharding
+
+The optimizer MUST be created after `fully_shard` (or after `accelerator.prepare(model)`
+in the Accelerate flow). If created before, the optimizer holds references to the original
+`torch.Tensor` parameters. After sharding those tensors are no longer the active
+parameters; they are replaced by `DTensor` objects.
+
+```python
+# WRONG - optimizer created before prepare()
+optimizer = torch.optim.AdamW(model.parameters())
+model, optimizer = accelerator.prepare(model, optimizer)
+# ^ prepare() re-binds optimizer.param_groups to DTensor params
+#   but this is fragile and not guaranteed to work in all cases
+
+# CORRECT
+optimizer = torch.optim.AdamW(model.parameters())
+model, optimizer = accelerator.prepare(model, optimizer)
+# Accelerate handles the re-binding internally when both are passed together
+```
+
+---
+
+## 9. Gradient Accumulation
+
+### The Core Issue
+
+Without special handling, the reduce-scatter (gradient synchronization) fires after every
+`loss.backward()`. For gradient accumulation, you want it to fire only on the last
+micro-batch of each accumulation window.
+
+### Accelerate API (Recommended)
+
+```python
+accelerator = Accelerator(gradient_accumulation_steps=4)
+
+for step, batch in enumerate(dataloader):
+    with accelerator.accumulate(model):
+        # Accelerate internally calls set_requires_gradient_sync(False)
+        # for intermediate steps and set_requires_gradient_sync(True)
+        # for the final step
+        outputs = model(**batch)
+        loss = outputs.loss
+        accelerator.backward(loss)
+        optimizer.step()
+        scheduler.step()
+        optimizer.zero_grad()
+```
+
+Internally, Accelerate's `accumulate()` context manager detects `fsdp_version=2` and calls:
+
+```python
+# On intermediate accumulation steps:
+for module in model.modules():
+    if isinstance(module, FSDPModule):
+        module.set_requires_gradient_sync(False)
+
+# On the final accumulation step:
+for module in model.modules():
+    if isinstance(module, FSDPModule):
+        module.set_requires_gradient_sync(True)
+```
+
+### Manual API (When Not Using Accelerate's accumulate())
+
+```python
+from torch.distributed.fsdp import FSDPModule
+
+GRAD_ACCUM_STEPS = 4
+
+for step, batch in enumerate(dataloader):
+    is_last_step = (step + 1) % GRAD_ACCUM_STEPS == 0
+
+    if not is_last_step:
+        # Suppress reduce-scatter for intermediate steps
+        for m in model.modules():
+            if isinstance(m, FSDPModule):
+                m.set_requires_gradient_sync(False)
+    else:
+        # Enable reduce-scatter on final step
+        for m in model.modules():
+            if isinstance(m, FSDPModule):
+                m.set_requires_gradient_sync(True)
+
+    outputs = model(**batch)
+    (outputs.loss / GRAD_ACCUM_STEPS).backward()
+
+    if is_last_step:
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        optimizer.zero_grad()
+```
+
+---
+
+## 10. Checkpointing: DTensor APIs vs DCP APIs
+
+There are two checkpointing paths. Use the right one for your situation.
+
+### Path A: DCP APIs (Recommended for Training)
+
+No extra communication. Each rank saves its own shard. Files use the `.distcp` format.
+Resharding on load (changing number of GPUs between save and load) is automatic.
+
+```python
+import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint.state_dict import (
+    get_state_dict,
+    set_state_dict,
+    StateDictOptions,
+)
+
+# --- SAVING ---
+model_sd, optim_sd = get_state_dict(model, optimizer)
+state = {"model": model_sd, "optimizer": optim_sd, "step": global_step}
+dcp.save(state, checkpoint_id="./checkpoints/step_1000/")
+
+# Each rank writes its own file:
+# ./checkpoints/step_1000/__0_0.distcp  (rank 0 model shard)
+# ./checkpoints/step_1000/__1_0.distcp  (rank 1 model shard)
+# ./checkpoints/step_1000/.metadata     (structural metadata)
+
+# --- LOADING ---
+# Initialize model+optimizer, prepare() them, then load:
+state_to_load = {"model": {}, "optimizer": {}}
+dcp.load(state_to_load, checkpoint_id="./checkpoints/step_1000/")
+set_state_dict(
+    model, optimizer,
+    model_state_dict=state_to_load["model"],
+    optim_state_dict=state_to_load["optimizer"],
+)
+```
+
+**Via Accelerate (wraps DCP automatically):**
+
+```python
+accelerator.save_state("./checkpoints/step_1000/")
+accelerator.load_state("./checkpoints/step_1000/")
+```
+
+### Path B: DTensor APIs (Recommended for Model Export)
+
+Requires an all-gather (communication). Produces a single file loadable without FSDP.
+Use for final model export to HuggingFace Hub or for loading into inference stacks.
+
+```python
+# --- SAVING (full state dict via DTensor) ---
+sharded_sd = model.state_dict()   # keys -> DTensor values
+cpu_state_dict = {}
+
+for param_name, sharded_param in sharded_sd.items():
+    # all-gather across ranks to get full tensor
+    full_param = sharded_param.full_tensor()
+    if torch.distributed.get_rank() == 0:
+        # Offload to CPU one by one to avoid GPU OOM
+        cpu_state_dict[param_name] = full_param.cpu()
+    else:
+        del full_param  # non-rank0 ranks discard
+
+if torch.distributed.get_rank() == 0:
+    torch.save(cpu_state_dict, "model_weights.pt")
+
+# --- LOADING (full state dict into sharded model) ---
+# Approach 1: DCP helper (recommended)
+from torch.distributed.checkpoint.state_dict import set_model_state_dict
+
+full_sd = torch.load("model_weights.pt", mmap=True, weights_only=True, map_location="cpu")
+set_model_state_dict(
+    model=model,
+    model_state_dict=full_sd,
+    options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True),
+)
+
+# Approach 2: Manual distribute_tensor
+from torch.distributed.tensor import distribute_tensor
+
+meta_sd = model.state_dict()   # DTensor state dict from sharded model
+sharded_sd_to_load = {}
+for name, full_tensor in full_sd.items():
+    sharded_meta = meta_sd[name]
+    sharded_sd_to_load[name] = torch.nn.Parameter(
+        distribute_tensor(full_tensor, sharded_meta.device_mesh, sharded_meta.placements)
+    )
+model.load_state_dict(sharded_sd_to_load, assign=True)
+# assign=True is required when loading into meta tensors
+```
+
+### Async Checkpointing (Not Yet in Accelerate)
+
+```python
+# PyTorch native only (not wrapped by Accelerate):
+future = dcp.async_save(state, checkpoint_id="./ckpt/")
+# Training continues immediately while the background thread writes to disk
+future.result()  # wait when needed (e.g., before the next checkpoint window)
+```
+
+### Saving for HuggingFace save_pretrained
+
+```python
+unwrapped = accelerator.unwrap_model(model)
+unwrapped.save_pretrained(
+    "./output/",
+    is_main_process=accelerator.is_main_process,
+    save_function=accelerator.save,
+    state_dict=accelerator.get_state_dict(model),  # triggers full gather to rank 0
+)
+```
+
+---
+
+## 11. CPU Offload
+
+CPU offload stores parameter shards in CPU RAM when they are not being actively computed.
+Parameters are moved to GPU only during the all-gather window, then moved back.
+
+### When to Use
+
+Use when the model barely fits on GPU with FSDP sharding alone, and you have enough CPU RAM.
+The penalty is PCIe bandwidth latency on every all-gather (parameters travel CPU->GPU).
+On NVLink servers this penalty is severe; on PCIe servers it depends on model size vs batch size.
+
+### Configuration
+
+```python
+from torch.distributed.fsdp import CPUOffloadPolicy
+
+plugin = FullyShardedDataParallelPlugin(
+    fsdp_version=2,
+    cpu_offload=CPUOffloadPolicy(
+        offload_params=True,
+        pin_memory=True,   # pinned memory enables DMA, faster transfer
+    ),
+)
+```
+
+YAML:
+
+```yaml
+fsdp_config:
+  fsdp_version: 2
+  fsdp_offload_params: true
+```
+
+### Memory Profile with Offload
+
+```
+Without offload, FULL_SHARD on 4 GPUs:
+  GPU memory = (model_bytes / 4) + largest_unit_working_set + activations
+
+With offload, FULL_SHARD on 4 GPUs:
+  GPU memory = largest_unit_working_set + activations
+  CPU memory = model_bytes / 4   (each rank's shard)
+```
+
+Offload can reduce GPU memory by the full shard footprint, but step time increases because
+every all-gather involves a CPU->GPU copy. With `pin_memory=True` the copy is asynchronous
+and can partially overlap with the compute of earlier layers.
+
+---
+
+## 12. FP8 All-Gather
+
+FP8 all-gather is an FSDP2-only feature. Instead of all-gathering parameters in bfloat16
+(2 bytes/value), FSDP2 can cast to FP8 (1 byte/value) before the collective, halving
+all-gather communication volume.
+
+### Requirements
+
+- PyTorch 2.1+
+- TorchAO (`pip install torchao`)
+- NVIDIA Hopper GPUs (H100/H200) for native FP8 tensor core support
+
+### Configuration
+
+```python
+plugin = FullyShardedDataParallelPlugin(
+    fsdp_version=2,
+    enable_fsdp_float8_all_gather=True,
+    # Optional: only apply FP8 all-gather to specific layer types
+    # Default filter is accelerate.utils.ao.filter_linear_layers
+    # which applies FP8 only to nn.Linear layers
+    filter_layer_for_fsdp_float8_all_gather=my_custom_filter,
+)
+```
+
+### What the Default Filter Does
+
+`accelerate.utils.ao.filter_linear_layers(module, layer_name)` returns `True` for
+`nn.Linear` modules and `False` for everything else. This means:
+
+- `nn.Linear` layers (attention projections, MLP layers): FP8 all-gather
+- `nn.Embedding` layers: BF16 all-gather (embedding tables benefit from precision)
+- `nn.LayerNorm`, `nn.RMSNorm`: BF16 all-gather (normalization params are small)
+
+### When FP8 Helps
+
+FP8 all-gather is beneficial when inter-GPU communication is the bottleneck (i.e., when
+GPU compute finishes faster than the all-gather). On PCIe-connected GPUs or multi-node
+setups with limited bandwidth, FP8 all-gather can measurably increase throughput.
+On NVLink-only intra-node setups where NVLink bandwidth exceeds compute throughput, the
+benefit is smaller but still present.
+
+---
+
+## 13. DeviceMesh and Multi-Dimensional Parallelism
+
+### 1D Mesh (Default: Pure Data Parallel Sharding)
+
+```python
+from torch.distributed.device_mesh import init_device_mesh
+
+# Accelerate creates this automatically when fsdp_version=2
+mesh = init_device_mesh("cuda", (world_size,))
+# All ranks are in a single FSDP shard group
+```
+
+### 2D Mesh: Hybrid Sharded Data Parallel (HSDP)
+
+HSDP is the multi-node FSDP configuration. Within each node, GPUs shard the model (FSDP).
+Across nodes, each node holds a full replica (DDP-style all-reduce).
+
+```python
+# Example: 2 nodes, 4 GPUs each = 8 total GPUs
+# Dim 0 (size 2): inter-node DDP dimension (replicate)
+# Dim 1 (size 4): intra-node FSDP dimension (shard)
+mesh_2d = init_device_mesh(
+    "cuda",
+    (2, 4),
+    mesh_dim_names=("replicate", "shard"),
+)
+
+# Apply fully_shard with the shard submesh
+for layer in model.layers:
+    fully_shard(layer, mesh=mesh_2d["shard"])
+fully_shard(model, mesh=mesh_2d["shard"])
+```
+
+In Accelerate, HSDP is accessed via `ParallelismConfig` and the `dp_shard_size` field.
+Direct `mesh_2d` construction is not yet exposed through `FullyShardedDataParallelPlugin`.
+
+### 3D Mesh: FSDP + Tensor Parallel + Context Parallel
+
+For the largest models (100B+), three-dimensional parallelism is used:
+
+```python
+from torch.distributed.device_mesh import init_device_mesh
+
+mesh_3d = init_device_mesh(
+    "cuda",
+    (dp, tp, cp),
+    mesh_dim_names=("dp", "tp", "cp"),
+)
+
+# FSDP operates on the dp dimension
+# Tensor parallel operates on the tp dimension
+# Context parallel operates on the cp dimension
+for layer in model.layers:
+    fully_shard(layer, mesh=mesh_3d["dp"])
+fully_shard(model, mesh=mesh_3d["dp"])
+
+# Tensor parallel would be applied separately to attention/mlp sublayers
+# using torch.distributed.tensor.parallel.parallelize_module
+```
+
+Accelerate's support for 3D parallelism is under active development (see `concept_guides/context_parallelism.md` and `concept_guides/sequence_parallelism.md`).
+
+---
+
+## 14. FSDP1-to-FSDP2 Migration
+
+### Code-Level Migration Steps
+
+**Step 1: Replace imports**
+
+```python
+# Before (FSDP1)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.distributed.fsdp import MixedPrecision
+
+# After (FSDP2)
+from torch.distributed.fsdp import fully_shard, FSDPModule
+from torch.distributed.fsdp import MixedPrecisionPolicy
+```
+
+**Step 2: Replace the wrapping call**
+
+```python
+# Before (FSDP1)
+policy = ModuleWrapPolicy({TransformerBlock})
+model = FSDP(model, auto_wrap_policy=policy)
+
+# After (FSDP2)
+for module in model.modules():
+    if isinstance(module, TransformerBlock):
+        fully_shard(module)
+fully_shard(model)
+```
+
+**Step 3: Replace `param_init_fn` with manual materialization**
+
+```python
+# Before (FSDP1) -- param_init_fn for meta device initialization
+def param_init_fn(module: nn.Module) -> None:
+    module.to_empty(device="cuda")
+    if hasattr(module, "reset_parameters"):
+        module.reset_parameters()
+
+with torch.device("meta"):
+    model = Transformer()
+model = FSDP(model, auto_wrap_policy=policy, param_init_fn=param_init_fn)
+
+# After (FSDP2)
+with torch.device("meta"):
+    model = Transformer()
+for module in model.modules():
+    if isinstance(module, TransformerBlock):
+        fully_shard(module)
+fully_shard(model)
+
+# Materialize after sharding
+model.to_empty(device="cuda")
+model.reset_parameters()
+```
+
+**Step 4: Replace `no_sync()` with `set_requires_gradient_sync`**
+
+```python
+# Before (FSDP1)
+with model.no_sync():
+    loss.backward()
+
+# After (FSDP2)
+for m in model.modules():
+    if isinstance(m, FSDPModule):
+        m.set_requires_gradient_sync(False)
+loss.backward()
+for m in model.modules():
+    if isinstance(m, FSDPModule):
+        m.set_requires_gradient_sync(True)
+# or just use accelerator.accumulate(model) which handles this
+```
+
+**Step 5: Replace state dict handling**
+
+```python
+# Before (FSDP1) -- requires StateDictType context manager
+from torch.distributed.fsdp import StateDictType, FullStateDictConfig
+with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, FullStateDictConfig()):
+    state_dict = model.state_dict()
+
+# After (FSDP2) -- DTensor state dict, no context manager needed
+state_dict = model.state_dict()  # returns DTensor state dict directly
+# To get full state dict:
+full_sd = {k: v.full_tensor() for k, v in state_dict.items()}
+```
+
+### Via Accelerate CLI
+
+```bash
+accelerate to-fsdp2 --config_file old.yaml --output_file new.yaml
+```
+
+The CLI translates the YAML fields shown in the table in §4. Fields not in the table are
+copied unchanged.
+
+---
+
+## 15. Known Gaps and Open Issues
+
+This section tracks the delta between what PyTorch FSDP2 supports and what Accelerate
+currently exposes. It is the primary input to §16 (contribution targets).
+
+### G1: Activation Checkpointing + FSDP2 Interaction (Partial)
+
+`fsdp_activation_checkpointing: true` in the YAML config applies `checkpoint_wrapper`
+from `torch.distributed.algorithms._checkpoint`. This was written for FSDP1 and works
+by wrapping each `FSDPModule` in a `CheckpointWrapper`. In FSDP2, the behavior during
+the backward recompute pass may miss some pre-backward all-gathers under certain
+gradient accumulation configurations where `set_requires_gradient_sync` is active.
+
+**Relevant files:** `src/accelerate/utils/fsdp_utils.py` (look for `apply_activation_checkpointing`),
+`tests/fsdp/test_fsdp.py` (look for `test_fsdp_activation_checkpointing`).
+
+### G2: Explicit Prefetching Not Exposed
+
+`FSDPModule.set_modules_to_forward_prefetch` and `set_modules_to_backward_prefetch` are
+not accessible through `FullyShardedDataParallelPlugin`. CPU-bound workloads (e.g.,
+models with heavy preprocessing) cannot benefit from multi-layer prefetching without
+bypassing Accelerate entirely.
+
+### G3: `ignored_params` Not Exposed for FSDP2
+
+FSDP1 had `ignored_modules` at the module level. FSDP2 has per-parameter control via
+`ignored_params` passed to `fully_shard`. This is critical for QLoRA and other PEFT
+methods where base model weights are frozen and should not participate in communication.
+
+Without `ignored_params`, frozen LoRA base weights are still all-gathered and
+reduce-scattered even though their gradients are zero. This wastes bandwidth and can
+trigger unnecessary memory peaks.
+
+**Filed issue:** Search https://github.com/huggingface/accelerate/issues for
+"fsdp2 ignored_params" to find the current tracking issue.
+
+### G4: Async Checkpointing Not Exposed
+
+PyTorch's `dcp.async_save` allows the training loop to continue immediately after calling
+save, while a background thread writes checkpoints to disk. For large models this
+eliminates multi-second checkpoint stalls. Accelerate has no wrapper for this.
+
+### G5: `output_dtype` and `cast_forward_inputs` Not in Plugin
+
+`MixedPrecisionPolicy` has two fields that Accelerate's plugin does not expose:
+
+- `output_dtype`: casts the module output tensor to a specific dtype (useful for
+  inter-layer dtype transitions in heterogeneous precision models)
+- `cast_forward_inputs`: controls whether inputs are cast to `param_dtype` before forward
+  (useful when input comes from a higher-precision layer)
+
+### G6: `to-fsdp2` CLI Does Not Translate Custom `MixedPrecision` Objects
+
+The `accelerate to-fsdp2` tool converts YAML fields. If a user created a custom
+`MixedPrecision` object in Python code and passed it to `FullyShardedDataParallelPlugin`,
+there is no migration path offered.
+
+### G7: `model.evaluate()` Before `model.train()` with FSDP2 Raises ValueError
+
+When using the HuggingFace `Trainer` and calling `trainer.evaluate()` before
+`trainer.train()`, the Trainer tries to `prepare()` the model without the optimizer
+(since training hasn't started). FSDP2 requires model and optimizer to be prepared
+together, causing a `ValueError`. The fix in `transformers/trainer.py` was applied to
+`_inner_training_loop` but not to the standalone `evaluate()` path.
+
+**Reference:** https://github.com/huggingface/transformers/issues/39961
+
+### G8: Per-Layer Mixed Precision Not Exposed
+
+PyTorch allows different `MixedPrecisionPolicy` instances per layer (e.g., first 4 layers
+in fp32, rest in bf16). Accelerate applies the same policy globally.
+
+---
+
+## 16. Contribution Targets (Prioritized)
+
+Each entry below is a scoped, actionable contribution with the relevant files and a
+suggested implementation approach.
+
+---
+
+### CT-1: Expose `ignored_params` for QLoRA/PEFT (HIGH PRIORITY)
+
+**Why:** QLoRA is the most common FSDP2 use case in the HuggingFace ecosystem. Without
+`ignored_params`, frozen base model weights participate in all-gather/reduce-scatter even
+though they never update. This is both a performance issue and a correctness concern for
+certain PEFT configurations.
+
+**Implementation sketch:**
+
+Add a field to `FullyShardedDataParallelPlugin`:
+
+```python
+# In src/accelerate/utils/dataclasses.py
+@dataclass
+class FullyShardedDataParallelPlugin:
+    ...
+    # FSDP2 only: callable(param_name, param) -> bool
+    # Return True to exclude a parameter from FSDP2 sharding
+    ignored_params_filter: Optional[Callable] = None
+```
+
+In `_prepare_fsdp2_model` (in `accelerator.py`), after identifying which modules to shard,
+filter their parameters:
+
+```python
+if plugin.ignored_params_filter is not None:
+    for name, param in module.named_parameters():
+        if plugin.ignored_params_filter(name, param):
+            # pass as ignored_params to fully_shard
+            ...
+```
+
+PyTorch's `fully_shard` accepts an `ignored_params` set:
+
+```python
+fully_shard(module, ignored_params={p for n, p in module.named_parameters()
+                                     if plugin.ignored_params_filter(n, p)})
+```
+
+**Test:** Add `test_fsdp2_ignored_params_lora` to `tests/fsdp/test_fsdp.py`. Verify that
+parameters excluded via `ignored_params_filter` retain their `torch.Tensor` type (not
+`DTensor`) and that LoRA adapter weights update correctly.
+
+**Files:** `src/accelerate/utils/dataclasses.py`, `src/accelerate/accelerator.py`,
+`tests/fsdp/test_fsdp.py`
+
+---
+
+### CT-2: Expose Explicit Prefetching (MEDIUM PRIORITY)
+
+**Why:** CPU-bound training workloads cannot benefit from FSDP2's prefetching without
+going around Accelerate. This is a performance gap for research code running complex
+data pipelines.
+
+**Implementation sketch:**
+
+Add two fields to the plugin:
+
+```python
+@dataclass
+class FullyShardedDataParallelPlugin:
+    ...
+    fsdp2_num_layers_to_forward_prefetch: int = 0
+    fsdp2_num_layers_to_backward_prefetch: int = 0
+```
+
+After `prepare()` completes and the model is sharded, apply the prefetch config as a
+post-prepare step in `accelerator.py`:
+
+```python
+def _configure_fsdp2_prefetching(self, model):
+    fsdp_model = self.unwrap_model(model)
+    n_fwd = self.state.fsdp_plugin.fsdp2_num_layers_to_forward_prefetch
+    n_bwd = self.state.fsdp_plugin.fsdp2_num_layers_to_backward_prefetch
+
+    # Detect top-level iterable layers (model.layers, model.blocks, etc.)
+    layers = _find_fsdp2_layers(fsdp_model)
+
+    if n_fwd > 0:
+        for i, layer in enumerate(layers[:-n_fwd]):
+            layer.set_modules_to_forward_prefetch(
+                [layers[i + j] for j in range(1, n_fwd + 1)]
+            )
+    if n_bwd > 0:
+        for i, layer in enumerate(layers[n_bwd:], start=n_bwd):
+            layer.set_modules_to_backward_prefetch(
+                [layers[i - j] for j in range(1, n_bwd + 1)]
+            )
+```
+
+**Files:** `src/accelerate/utils/dataclasses.py`, `src/accelerate/accelerator.py`
+
+---
+
+### CT-3: Async Checkpointing Wrapper (MEDIUM PRIORITY)
+
+**Why:** For models like Llama-70B, checkpoint saves take 30-120 seconds and block
+training. Async checkpointing eliminates this stall.
+
+**Implementation sketch:**
+
+Add a method to `Accelerator`:
+
+```python
+def save_state_async(self, output_dir: str) -> "Future":
+    """
+    Non-blocking version of save_state(). Returns a Future.
+    Training continues immediately. Call future.result() to wait.
+    Only supported with FSDP2 + SHARDED_STATE_DICT.
+    """
+    if not (self.distributed_type == DistributedType.FSDP
+            and self.state.fsdp_plugin.fsdp_version == 2):
+        raise ValueError("save_state_async requires FSDP2 with SHARDED_STATE_DICT")
+
+    import torch.distributed.checkpoint as dcp
+    from torch.distributed.checkpoint.state_dict import get_state_dict
+
+    model_sd, optim_sd = get_state_dict(self._models[0], self._optimizers[0])
+    state = {"model": model_sd, "optimizer": optim_sd}
+    return dcp.async_save(state, checkpoint_id=output_dir)
+```
+
+**Files:** `src/accelerate/accelerator.py`, `tests/fsdp/test_fsdp.py`
+
+---
+
+### CT-4: Fix `to-fsdp2` CLI for Python-Defined MixedPrecision (LOW PRIORITY)
+
+**Why:** Users who set `mixed_precision_policy` via Python code have no migration tool.
+The CLI tool only handles YAML.
+
+**Implementation sketch:**
+
+Add a warning in `FullyShardedDataParallelPlugin.__post_init__` when `fsdp_version=2`
+and `mixed_precision_policy` is an instance of the old `MixedPrecision` class (not
+`MixedPrecisionPolicy`):
+
+```python
+if self.fsdp_version == 2 and isinstance(self.mixed_precision_policy, MixedPrecision):
+    warnings.warn(
+        "You passed a MixedPrecision object (FSDP1) to FullyShardedDataParallelPlugin "
+        "with fsdp_version=2. FSDP2 uses MixedPrecisionPolicy. Attempting automatic "
+        "conversion: param_dtype and reduce_dtype will be preserved, buffer_dtype "
+        "will be dropped. Pass a MixedPrecisionPolicy directly to suppress this warning.",
+        UserWarning,
+    )
+    self.mixed_precision_policy = MixedPrecisionPolicy(
+        param_dtype=self.mixed_precision_policy.param_dtype,
+        reduce_dtype=self.mixed_precision_policy.reduce_dtype,
+    )
+```
+
+**Files:** `src/accelerate/utils/dataclasses.py`
+
+---
+
+### CT-5: Activation Checkpointing FSDP2 Correctness Audit (HIGH PRIORITY)
+
+**Why:** This is a potential correctness bug, not just a missing feature. The current
+activation checkpointing implementation for FSDP2 may miss pre-backward all-gathers
+during the recompute phase under certain gradient accumulation configurations. Needs
+careful testing.
+
+**Investigation steps:**
+
+1. Run `tests/fsdp/test_fsdp.py::test_fsdp_activation_checkpointing` with `fsdp_version=2`
+   and `gradient_accumulation_steps=4`.
+2. Compare gradients for the first accumulated batch to a reference run without
+   activation checkpointing.
+3. If gradients diverge, the bug is confirmed. The fix involves ensuring that the
+   `set_requires_gradient_sync=False` state does not suppress the pre-backward hook
+   that runs during the recompute phase of `torch.utils.checkpoint.checkpoint`.
+
+**Files:** `src/accelerate/utils/fsdp_utils.py` (look for `apply_activation_checkpointing`),
+`src/accelerate/accelerator.py`
+
+---
+
+## 17. Test Coverage Map
+
+Reference: `tests/fsdp/test_fsdp.py`
+
+| Feature | FSDP1 Test | FSDP2 Test | Notes |
+|---|---|---|---|
+| Basic sharding + forward | `test_fsdp_basic` | Exists | |
+| FULL_SHARD strategy | `test_fsdp_full_shard` | Via `reshard_after_forward=True` | |
+| SHARD_GRAD_OP | `test_fsdp_shard_grad_op` | Via `reshard_after_forward=False` | |
+| HYBRID_SHARD | `test_fsdp_hybrid_shard` | No FSDP2 equivalent test | Missing |
+| Mixed precision bf16 | `test_fsdp_mixed_precision` | Exists | |
+| CPU offload | `test_fsdp_cpu_offload` | Partial | |
+| SHARDED_STATE_DICT save/load | Exists | Exists (DCP) | |
+| FULL_STATE_DICT save/load | Exists | Exists | |
+| Gradient accumulation | Exists | Exists | |
+| Activation checkpointing | Exists | Partial (see G1) | |
+| cpu_ram_efficient_loading | Exists | Exists | |
+| Peak memory tracking | `fsdp_with_peak_mem_tracking.py` | No FSDP2 example | Missing |
+| ignored_params | Not applicable | Not tested | Missing |
+| Explicit prefetching | N/A | Not tested | Missing |
+| FP8 all-gather | N/A | Unit test only | Needs integration test |
+| Async checkpointing | N/A | Not tested | Missing |
+
+---
+
+## 18. Quick Diagnostic Checklist
+
+Use this when something breaks with FSDP2. Work top to bottom.
+
+```
+[ ] Is fsdp_version: 2 set in the config?
+    -> If not, you're running FSDP1. Check fsdp_version field.
+
+[ ] Are model and optimizer passed together to prepare()?
+    -> FSDP2 requires both in the same call. Separate calls raise ValueError.
+
+[ ] Is the optimizer created AFTER prepare() or at least passed with the model?
+    -> Optimizer must see DTensor parameters, not original torch.Tensors.
+
+[ ] Is model(x) used instead of model.forward(x)?
+    -> model.forward() bypasses pre-forward hooks and skips the all-gather.
+       Always call model(x).
+
+[ ] Are fully_shard calls applied bottom-up?
+    -> Sub-modules first, root last. If root is sharded first, sub-module
+       sharding is ignored.
+
+[ ] Is the checkpoint loading correct?
+    -> SHARDED_STATE_DICT checkpoints must be loaded with dcp.load(),
+       not torch.load(). Use accelerator.load_state() for the safe path.
+
+[ ] Are there NaN/Inf gradients?
+    -> Check reduce_dtype. With reduce_dtype=bfloat16 at large batch sizes,
+       gradient precision loss can cause instability. Switch to reduce_dtype=float32.
+
+[ ] Does memory spike unexpectedly?
+    -> Profile with torch.cuda.memory_stats(). Memory spikes during forward
+       suggest reshard_after_forward=False (SHARD_GRAD_OP). Switch to True.
+    -> Spikes during save suggest FULL_STATE_DICT. Switch to SHARDED_STATE_DICT.
+
+[ ] Does FSDP2 with activation checkpointing produce wrong gradients?
+    -> Suspected bug. See G1 in §15. Temporarily disable activation checkpointing
+       and confirm gradients are correct. File an issue if confirmed.
+
+[ ] LoRA/PEFT adapter weights are not updating?
+    -> Check if adapter parameters are being treated as ignored. See G3 in §15.
+       Workaround: manually call fully_shard on adapter layers with reshard_after_forward=False
+       so they participate in communication but with minimal overhead.
+```

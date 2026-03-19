@@ -1,0 +1,1872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Distributed Training Communications — Visual Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #05090F;
+  --surf: #0C1420;
+  --surf2: #111E30;
+  --border: #1A2A3F;
+  --border2: #243448;
+  --text: #B8CBDF;
+  --text-dim: #566878;
+  --text-bright: #E4EEF8;
+  --accent: #3B82F6;
+  --orange: #F97316;
+  --green: #22C55E;
+  --amber: #EAB308;
+  --purple: #8B5CF6;
+  --cyan: #06B6D4;
+  --pink: #EC4899;
+  --red: #EF4444;
+  --chunk-A: #3B82F6;
+  --chunk-B: #F97316;
+  --chunk-C: #22C55E;
+  --chunk-D: #EAB308;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.75;
+}
+/* Layout */
+.page { max-width: 1000px; margin: 0 auto; padding: 0 24px 80px; }
+/* Header */
+.site-header {
+  border-bottom: 1px solid var(--border);
+  padding: 48px 0 40px;
+  margin-bottom: 56px;
+}
+.header-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.site-header h1 {
+  font-family: 'Syne', sans-serif;
+  font-size: 42px;
+  font-weight: 800;
+  color: var(--text-bright);
+  line-height: 1.15;
+  margin-bottom: 16px;
+}
+.site-header .subtitle {
+  font-size: 17px;
+  color: var(--text-dim);
+  max-width: 580px;
+  font-weight: 300;
+}
+/* TOC */
+.toc {
+  background: var(--surf);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px 28px;
+  margin-bottom: 56px;
+}
+.toc h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 16px;
+}
+.toc ol { padding-left: 20px; }
+.toc li { margin-bottom: 5px; }
+.toc a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 14.5px;
+}
+.toc a:hover { text-decoration: underline; }
+.toc .toc-sub { padding-left: 20px; list-style: disc; margin-top: 5px; }
+/* Section */
+section { margin-bottom: 72px; scroll-margin-top: 20px; }
+section h2 {
+  font-family: 'Syne', sans-serif;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-bright);
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+section h3 {
+  font-family: 'Syne', sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin: 28px 0 12px;
+}
+section p { margin-bottom: 16px; }
+section p:last-child { margin-bottom: 0; }
+/* Callout box */
+.callout {
+  background: var(--surf);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  padding: 14px 18px;
+  margin: 20px 0;
+  font-size: 15px;
+}
+.callout.orange { border-color: var(--orange); }
+.callout.green { border-color: var(--green); }
+.callout.purple { border-color: var(--purple); }
+.callout strong { color: var(--text-bright); }
+/* Diagram wrapper */
+.diagram-wrap {
+  background: var(--surf);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px 20px;
+  margin: 24px 0;
+  overflow-x: auto;
+}
+.diagram-wrap .diagram-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 16px;
+}
+/* SVG defaults */
+svg text { font-family: 'JetBrains Mono', monospace; }
+/* Code */
+code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  background: var(--surf2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--cyan);
+}
+pre {
+  background: var(--surf2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  overflow-x: auto;
+  margin: 16px 0;
+}
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  color: #A8C3D8;
+  line-height: 1.7;
+}
+/* Legend */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 16px 0;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.legend-swatch {
+  width: 20px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+/* Reference table */
+.ref-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  margin-top: 20px;
+}
+.ref-table th, .ref-table td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.ref-table th {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--surf);
+}
+.ref-table td:first-child {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--accent);
+  font-size: 13px;
+}
+.ref-table tr:hover td { background: var(--surf); }
+/* Divider */
+.divider { border: none; border-top: 1px solid var(--border); margin: 48px 0; }
+/* Tag badges */
+.tag {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  background: var(--surf2);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  padding: 2px 7px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.tag.blue { color: var(--accent); border-color: #1E3A5F; background: #0A1828; }
+.tag.orange { color: var(--orange); border-color: #5A2E10; background: #1A0D05; }
+.tag.purple { color: var(--purple); border-color: #3D2470; background: #130A20; }
+.tag.green { color: var(--green); border-color: #1A4D2E; background: #061510; }
+/* Step list */
+.steps { list-style: none; padding: 0; margin: 12px 0; }
+.steps li {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 12px;
+  font-size: 15px;
+}
+.step-num {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+</style>
+</head>
+<body>
+<!-- Shared SVG defs for arrowheads (referenced by id from all diagrams) -->
+<svg style="position:absolute;width:0;height:0;overflow:hidden">
+  <defs>
+    <marker id="ah-blue" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="#60A5FA"/>
+    </marker>
+    <marker id="ah-white" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="#E2E8F0"/>
+    </marker>
+    <marker id="ah-dim" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="ah-green" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="#22C55E"/>
+    </marker>
+    <marker id="ah-orange" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="#F97316"/>
+    </marker>
+    <marker id="ah-purple" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="#8B5CF6"/>
+    </marker>
+  </defs>
+</svg>
+
+<div class="page">
+<header class="site-header">
+  <p class="header-tag">PyTorch Distributed</p>
+  <h1>Distributed Training Communications</h1>
+  <p class="subtitle">Every collective operation explained from first principles, with diagrams showing exactly how data moves between GPUs.</p>
+</header>
+
+<nav class="toc">
+  <h3>Table of Contents</h3>
+  <ol>
+    <li><a href="#why">Why Do We Need Collective Operations?</a></li>
+    <li><a href="#data-model">The Data Model: What Lives on Each GPU</a></li>
+    <li><a href="#p2p">Point-to-Point: Send &amp; Recv</a></li>
+    <li><a href="#broadcast">Broadcast</a></li>
+    <li><a href="#scatter">Scatter</a></li>
+    <li><a href="#gather">Gather</a></li>
+    <li><a href="#all-gather">All-Gather</a></li>
+    <li><a href="#reduce">Reduce</a></li>
+    <li><a href="#all-reduce">All-Reduce</a></li>
+    <li><a href="#reduce-scatter">Reduce-Scatter</a></li>
+    <li><a href="#ring">How Ring All-Reduce Actually Works</a></li>
+    <li><a href="#ddp-use">Used In: DDP</a></li>
+    <li><a href="#fsdp2-use">Used In: FSDP2</a></li>
+    <li><a href="#tp-use">Used In: Tensor Parallel</a></li>
+    <li><a href="#cheatsheet">Quick Reference</a></li>
+  </ol>
+</nav>
+
+<!-- ================================================================ -->
+<section id="why">
+<h2>1. Why Do We Need Collective Operations?</h2>
+<p>When you train a model on a single GPU, everything is simple: one GPU holds all the weights, computes the forward pass, computes gradients, and updates the weights. No communication with anyone.</p>
+<p>The moment you spread training across multiple GPUs, those GPUs need to <strong>talk to each other</strong>. They need to share gradients, share weight shards, share activations. The patterns for how data gets moved between GPUs are called <strong>collective operations</strong> (or just "collectives").</p>
+<p>The word "collective" means the operation involves <em>all</em> the participating processes (GPUs) together. A point-to-point is not collective: it is just one GPU sending data to one specific other GPU. Collectives are the group operations: broadcast to all, gather from all, reduce across all.</p>
+
+<div class="callout">
+  <strong>How GPUs talk in PyTorch.</strong> PyTorch uses NCCL (NVIDIA Collective Communication Library) as the communication backend for GPU-to-GPU data transfer. NCCL implements all the collectives described in this document and is heavily optimized for NVLink (fast intra-node connections) and InfiniBand (fast inter-node connections). You initialize it with <code>dist.init_process_group(backend="nccl")</code>.
+</div>
+
+<p>In this tutorial we will use 4 GPUs for all diagrams. Each GPU is called a "rank" (rank 0, rank 1, rank 2, rank 3). The total number of GPUs is the "world size" (4 here).</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-swatch" style="background:#3B82F6"></div><span>Chunk A (rank 0's data)</span></div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#F97316"></div><span>Chunk B (rank 1's data)</span></div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#22C55E"></div><span>Chunk C (rank 2's data)</span></div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#EAB308"></div><span>Chunk D (rank 3's data)</span></div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#8B5CF6"></div><span>Σ (reduced/summed result)</span></div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#1A2332;border:1px solid #334155"></div><span>Empty (no data)</span></div>
+</div>
+</section>
+
+<!-- ================================================================ -->
+<section id="data-model">
+<h2>2. The Data Model: What Lives on Each GPU</h2>
+<p>Before explaining any operation, let's establish what "data on a GPU" means visually. In the diagrams below, each GPU is shown as a dark box. Inside the box, colored tiles represent tensors (data). When a GPU has no data for a particular slot, the tile is empty (dark).</p>
+<p>The colored chunks represent <em>different values</em> (or different slices of a tensor). When we write "GPU 0 has chunk A" we mean rank 0 holds a tensor (e.g., a gradient shard, a weight shard, or an activation shard).</p>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">Example: 4 GPUs, each holding a different chunk</div>
+  <div id="d-data-model"></div>
+</div>
+
+<p>Notice: the data chunks are different on every GPU (A, B, C, D) and together they represent either:</p>
+<ul style="padding-left:24px;margin-bottom:16px">
+  <li><strong>Different slices of one big tensor</strong> (like a weight matrix sharded across GPUs — used in FSDP2 and TP)</li>
+  <li><strong>Different values of the same-shaped tensor</strong> (like gradient tensors with different values because each GPU processed different data — used in DDP)</li>
+</ul>
+<p>Which interpretation applies depends on <em>which collective you are performing</em>. The diagrams make no assumption — they just show what data is where.</p>
+</section>
+
+<!-- ================================================================ -->
+<section id="p2p">
+<h2>3. Point-to-Point: Send &amp; Recv</h2>
+<span class="tag blue">dist.send</span><span class="tag blue">dist.recv</span>
+
+<p>The most basic communication primitive. One specific GPU sends data directly to one specific other GPU. No other GPUs are involved. Think of it like sending a direct message: rank 2 sends its tensor to rank 0, and nobody else sees it.</p>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">Point-to-point: GPU 1 sends chunk B to GPU 3</div>
+  <div id="d-p2p"></div>
+</div>
+
+<p>Key properties:</p>
+<ul style="padding-left:24px;margin-bottom:16px">
+  <li>Only the sender and receiver are involved.</li>
+  <li><code>send</code> and <code>recv</code> must be called as a matched pair: one GPU calls <code>send</code>, the other calls <code>recv</code>, or the program hangs.</li>
+  <li>Used in <strong>Pipeline Parallelism</strong> to pass activations from one pipeline stage to the next.</li>
+</ul>
+
+<pre><code>import torch.distributed as dist
+
+if dist.get_rank() == 1:
+    tensor = torch.tensor([1.0, 2.0, 3.0]).cuda()
+    dist.send(tensor, dst=3)         # rank 1 sends to rank 3
+
+if dist.get_rank() == 3:
+    tensor = torch.zeros(3).cuda()
+    dist.recv(tensor, src=1)         # rank 3 receives from rank 1
+    print(tensor)                    # [1.0, 2.0, 3.0]</code></pre>
+</section>
+
+<!-- ================================================================ -->
+<section id="broadcast">
+<h2>4. Broadcast</h2>
+<span class="tag blue">dist.broadcast</span>
+
+<p>Imagine rank 0 has a value and needs every other GPU to have the exact same value. That is a broadcast. One GPU (the "root") sends an identical copy to all other GPUs. The other GPUs receive it and overwrite whatever they had.</p>
+
+<p>Think of it like a teacher writing the answer on the board: the teacher (rank 0) has the answer; every student (all other ranks) copies it down. Everyone ends up with the same thing.</p>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">Broadcast: GPU 0 sends chunk A to all ranks</div>
+  <div id="d-broadcast"></div>
+</div>
+
+<p>When is it used? At the start of distributed training, PyTorch broadcasts the initial model weights from rank 0 to all other ranks so every GPU starts with identical weights.</p>
+
+<pre><code>import torch.distributed as dist
+
+tensor = torch.zeros(4).cuda()
+if dist.get_rank() == 0:
+    tensor = torch.tensor([1.0, 2.0, 3.0, 4.0]).cuda()
+
+dist.broadcast(tensor, src=0)  # all ranks now have [1., 2., 3., 4.]</code></pre>
+</section>
+
+<!-- ================================================================ -->
+<section id="scatter">
+<h2>5. Scatter</h2>
+<span class="tag blue">dist.scatter</span>
+
+<p>Scatter is like a teacher distributing worksheets: the teacher (root rank) starts with a stack of 4 different worksheets and hands one specific worksheet to each student. Unlike broadcast where everyone gets the same thing, in scatter each GPU gets a <em>different</em> chunk.</p>
+
+<p>Concretely: rank 0 has one big tensor split into 4 pieces [A, B, C, D]. After the scatter, rank 0 keeps A, rank 1 gets B, rank 2 gets C, rank 3 gets D.</p>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">Scatter: GPU 0 distributes different chunks to each rank</div>
+  <div id="d-scatter"></div>
+</div>
+
+<p>The root rank "scatters" different slices of its tensor out to different destinations.</p>
+
+<pre><code>import torch.distributed as dist
+
+rank = dist.get_rank()
+output = torch.zeros(1).cuda()
+
+if rank == 0:
+    scatter_list = [torch.tensor([1.]).cuda(),   # chunk A -> rank 0
+                    torch.tensor([2.]).cuda(),   # chunk B -> rank 1
+                    torch.tensor([3.]).cuda(),   # chunk C -> rank 2
+                    torch.tensor([4.]).cuda()]   # chunk D -> rank 3
+    dist.scatter(output, scatter_list, src=0)
+else:
+    dist.scatter(output, src=0)
+
+# rank 0: output=[1.]; rank 1: output=[2.]; etc.</code></pre>
+</section>
+
+<!-- ================================================================ -->
+<section id="gather">
+<h2>6. Gather</h2>
+<span class="tag blue">dist.gather</span>
+
+<p>Gather is the exact reverse of scatter. Every GPU sends its chunk to one central rank (the "root"), and the root collects all of them in order. The non-root ranks end up with nothing new; only the root gets the full collection.</p>
+
+<p>Think of it like students handing their homework to the teacher: each student (all ranks) submits their work (their tensor), and only the teacher (root rank) receives all of them.</p>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">Gather: all ranks send their chunk to GPU 0</div>
+  <div id="d-gather"></div>
+</div>
+
+<pre><code>import torch.distributed as dist
+
+rank = dist.get_rank()
+tensor = torch.tensor([float(rank + 1)]).cuda()  # [1.], [2.], [3.], [4.]
+
+if rank == 0:
+    gather_list = [torch.zeros(1).cuda() for _ in range(4)]
+    dist.gather(tensor, gather_list, dst=0)
+    # gather_list = [[1.], [2.], [3.], [4.]]
+else:
+    dist.gather(tensor, dst=0)</code></pre>
+</section>
+
+<!-- ================================================================ -->
+<section id="all-gather">
+<h2>7. All-Gather</h2>
+<span class="tag blue">dist.all_gather</span>
+<span class="tag green">FSDP2: parameter reconstruction</span>
+<span class="tag purple">TP: Sequence Parallel</span>
+
+<p>All-Gather is like Gather, but instead of only the root ending up with the complete collection, <em>every</em> GPU gets the complete collection. Each GPU contributes its own chunk, and at the end every GPU has everyone's chunk concatenated together.</p>
+
+<p>Before: each GPU has one small piece. After: every GPU has all the pieces stitched together into a full tensor.</p>
+
+<div class="callout green">
+  <strong>This is how FSDP2 reconstructs weights for the forward pass.</strong> Each GPU stores only 1/N of each weight matrix (sharded to save memory). Before running the forward pass through a layer, FSDP2 performs an All-Gather across all GPUs to reconstruct the complete weight matrix on every GPU temporarily. After the forward pass completes, the full weight is freed and only the shard remains.
+</div>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">All-Gather: each rank contributes a shard → all ranks get the full tensor</div>
+  <div id="d-all-gather"></div>
+</div>
+
+<pre><code>import torch.distributed as dist
+
+rank = dist.get_rank()
+local_chunk = torch.tensor([float(rank + 1)]).cuda()  # shard
+
+output_list = [torch.zeros(1).cuda() for _ in range(4)]
+dist.all_gather(output_list, local_chunk)
+# ALL ranks now have output_list = [[1.], [2.], [3.], [4.]]
+
+# Or use the tensor API:
+full = torch.zeros(4).cuda()
+dist.all_gather_into_tensor(full, local_chunk)
+# full = [1., 2., 3., 4.] on ALL ranks</code></pre>
+</section>
+
+<!-- ================================================================ -->
+<section id="reduce">
+<h2>8. Reduce</h2>
+<span class="tag blue">dist.reduce</span>
+
+<p>Reduce is the math operation of all-hands voting: every GPU has its own value (or tensor), and they all combine (sum, mean, max, etc.) into a single result. Crucially, <strong>only one GPU (the root) gets the final answer</strong>. The other GPUs do the work of sending but do not receive the result.</p>
+
+<p>Example: four GPUs have gradients [2], [5], [3], [4]. After a Reduce (sum) to rank 0, only rank 0 gets [14]. Ranks 1, 2, 3 still have their original values but they are not used anymore.</p>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">Reduce (sum): all values collected and summed on GPU 0 only</div>
+  <div id="d-reduce"></div>
+</div>
+
+<p>Reduce is rarely used directly in modern deep learning because usually you want <em>all</em> GPUs to have the result (use All-Reduce for that). Reduce is used when only one GPU needs the result, such as for logging or computing a global metric on rank 0 only.</p>
+
+<pre><code>import torch.distributed as dist
+
+rank = dist.get_rank()
+tensor = torch.tensor([float(rank + 1)]).cuda()  # [1.], [2.], [3.], [4.]
+
+dist.reduce(tensor, dst=0, op=dist.ReduceOp.SUM)
+# rank 0: tensor = [10.] (1+2+3+4)
+# rank 1,2,3: tensor unchanged (still has local value)</code></pre>
+</section>
+
+<!-- ================================================================ -->
+<section id="all-reduce">
+<h2>9. All-Reduce</h2>
+<span class="tag blue">dist.all_reduce</span>
+<span class="tag green">DDP: gradient averaging</span>
+<span class="tag purple">TP: RowwiseParallel output</span>
+
+<p>All-Reduce is the superstar collective. It is Reduce, but instead of only the root getting the result, <strong>every GPU gets the combined result</strong>. Every GPU contributes a value, they all get combined (usually summed), and then the combined result is sent back to every GPU.</p>
+
+<p>Think of a team counting votes: everyone says their number (contribution), someone adds them all up (reduce), and then the total is announced to everyone (broadcast back). Hence: all-reduce = reduce + broadcast back.</p>
+
+<div class="callout green">
+  <strong>This is the backbone of DDP (Data Parallel) training.</strong> Each GPU processes a different mini-batch and computes its own gradients. Those gradients are different on every GPU. An All-Reduce (sum or mean) combines all the gradients so that every GPU gets the same averaged gradient. Then every GPU applies the same gradient update and stays synchronized.
+</div>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">All-Reduce (sum): every rank gets the combined result</div>
+  <div id="d-all-reduce"></div>
+</div>
+
+<p>The key insight: before All-Reduce, every GPU has a <em>different value</em> (their local gradient). After All-Reduce, every GPU has the <em>same value</em> (the sum/mean of all gradients). This synchronization is what keeps all GPUs training the same model.</p>
+
+<pre><code>import torch.distributed as dist
+
+rank = dist.get_rank()
+gradient = torch.tensor([float(rank + 1)]).cuda()  # different on each rank
+
+dist.all_reduce(gradient, op=dist.ReduceOp.SUM)
+# ALL ranks: gradient = [10.] (1+2+3+4)
+
+# For gradient averaging (mean):
+dist.all_reduce(gradient, op=dist.ReduceOp.AVG)
+# ALL ranks: gradient = [2.5] (10/4)</code></pre>
+</section>
+
+<!-- ================================================================ -->
+<section id="reduce-scatter">
+<h2>10. Reduce-Scatter</h2>
+<span class="tag blue">dist.reduce_scatter</span>
+<span class="tag green">FSDP2: gradient sharding</span>
+<span class="tag purple">TP: Sequence Parallel</span>
+
+<p>Reduce-Scatter is the most nuanced collective and the one most people get confused about. Let's break it down very carefully.</p>
+
+<h3>The situation before Reduce-Scatter</h3>
+<p>Every GPU has the <strong>same-shaped full tensor</strong>. But importantly, each GPU's tensor has <em>different values</em> for the same positions. Think of it as 4 GPUs each holding a full copy of a gradient tensor, but each copy has been computed from a different mini-batch (so the values differ).</p>
+
+<p>Visually: every GPU has a tensor with 4 chunks [A₀,B₀,C₀,D₀], [A₁,B₁,C₁,D₁], etc. The subscript tells you which rank's version. The letter tells you which position (chunk) in the tensor.</p>
+
+<h3>What Reduce-Scatter does</h3>
+<p>It does two things simultaneously:</p>
+<ol style="padding-left:24px;margin-bottom:16px">
+  <li><strong>Reduces</strong> (sums) each position across all ranks: ΣA = A₀+A₁+A₂+A₃, ΣB = B₀+B₁+B₂+B₃, etc.</li>
+  <li><strong>Scatters</strong> the results: rank 0 gets ΣA, rank 1 gets ΣB, rank 2 gets ΣC, rank 3 gets ΣD.</li>
+</ol>
+
+<p>After Reduce-Scatter: each GPU has a <em>smaller</em> tensor (only 1/N of the original), but that shard contains the <em>correct reduced value</em> for its portion.</p>
+
+<div class="callout orange">
+  <strong>This is how FSDP2 handles gradients.</strong> After the backward pass, every GPU has computed gradients for the full set of parameters (same shape). FSDP2 performs Reduce-Scatter: it sums the gradients across GPUs AND immediately shards the result. Each GPU ends up with the gradient shard for the parameters it "owns". This is more memory efficient than All-Reduce because you never need to hold the full gradient on every GPU simultaneously.
+</div>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">Reduce-Scatter: each rank holds the full tensor → each rank gets one reduced shard</div>
+  <div id="d-reduce-scatter"></div>
+</div>
+
+<div class="callout purple">
+  <strong>All-Reduce = Reduce-Scatter + All-Gather.</strong> This is the key identity. If you do Reduce-Scatter (every GPU gets a reduced shard), and then All-Gather (every GPU gets all shards concatenated), you end up with exactly what All-Reduce would have given you. FSDP2 and Sequence Parallel deliberately <em>stop after Reduce-Scatter</em> to save memory. They do not do the All-Gather because they want the sharded result, not the full result.
+</div>
+
+<pre><code>import torch.distributed as dist
+
+rank = dist.get_rank()
+world_size = dist.get_world_size()
+
+# Every rank has the FULL tensor (e.g., gradient of shape [4])
+full_gradient = torch.tensor([float(rank)*10 + i for i in range(4)]).cuda()
+# rank 0: [0.,1.,2.,3.], rank 1: [10.,11.,12.,13.], etc.
+
+output_shard = torch.zeros(1).cuda()  # will receive 1/4 of the result
+
+dist.reduce_scatter_tensor(output_shard, full_gradient, op=dist.ReduceOp.SUM)
+# rank 0: output_shard = [sum of position 0 across all ranks]
+# rank 1: output_shard = [sum of position 1 across all ranks]
+# etc.</code></pre>
+</section>
+
+<!-- ================================================================ -->
+<section id="ring">
+<h2>11. How Ring All-Reduce Actually Works</h2>
+
+<p>You know <em>what</em> All-Reduce produces (every GPU gets the sum). But <em>how</em> does NCCL actually implement it without a bottleneck at a single "coordinator" GPU?</p>
+
+<p>The naive implementation would have all GPUs send their data to rank 0, rank 0 sums everything, and then rank 0 broadcasts the result back. The problem: rank 0 becomes the bottleneck. With 1000 GPUs, rank 0 must receive 999 tensors, sum them, and send 999 results. That does not scale.</p>
+
+<p>NCCL uses the <strong>Ring All-Reduce</strong> algorithm instead. It has two phases:</p>
+
+<ul style="padding-left:24px;margin-bottom:16px">
+  <li><strong>Phase 1 (Reduce-Scatter)</strong>: data circulates around a ring, accumulating partial sums. After this phase, each GPU holds one fully-reduced shard.</li>
+  <li><strong>Phase 2 (All-Gather)</strong>: the fully-reduced shards circulate around the ring again. After this phase, every GPU has all the shards (the full result).</li>
+</ul>
+
+<p>The clever part: every GPU sends and receives exactly the same amount of data. There is no single bottleneck. All GPUs are active in parallel. The total communication volume is <code>2 * (N-1)/N * tensor_size</code> per GPU, which approaches <code>2 * tensor_size</code> as N grows. This is nearly optimal.</p>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">Ring topology: 4 GPUs connected in a ring</div>
+  <div id="d-ring-topology"></div>
+</div>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">Ring All-Reduce: Phase 1 (Reduce-Scatter) — 3 steps for 4 GPUs</div>
+  <div id="d-ring-rs"></div>
+</div>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">Ring All-Reduce: Phase 2 (All-Gather) — 3 more steps for 4 GPUs</div>
+  <div id="d-ring-ag"></div>
+</div>
+
+<p>After Phase 1, each GPU has one fully-reduced shard. After Phase 2, every GPU has all four shards, giving the full sum. The same algorithm works for any number of GPUs: with N GPUs you do N-1 steps in Phase 1 and N-1 steps in Phase 2.</p>
+
+<div class="callout">
+  <strong>Why this matters for practice.</strong> The ring topology is why putting TP <em>within</em> a node (over NVLink) is so important: NVLink has much higher bandwidth than Ethernet or InfiniBand between nodes. All-Reduce over slow inter-node links is expensive. FSDP2's design (reduce-scatter instead of all-reduce) reduces communication by half on the inter-node DP axis.
+</div>
+</section>
+
+<!-- ================================================================ -->
+<section id="ddp-use">
+<h2>12. Used In: DDP (Data Parallel Training)</h2>
+<span class="tag green">All-Reduce</span>
+
+<p>DDP (DistributedDataParallel) is the simplest distributed training strategy. Each GPU holds a complete copy of the model. Each GPU processes a different mini-batch. After the backward pass, the gradients on different GPUs are different (because different data was processed). An All-Reduce synchronizes them so every GPU applies the same gradient update.</p>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">DDP training step</div>
+  <div id="d-ddp"></div>
+</div>
+
+<h3>The detailed flow</h3>
+<ul class="steps">
+  <li><div class="step-num">1</div><span><strong>All GPUs hold identical weights.</strong> (Synchronized from the start, or broadcast at init.)</span></li>
+  <li><div class="step-num">2</div><span><strong>Each GPU processes a different mini-batch.</strong> Forward pass computes different activations and loss values.</span></li>
+  <li><div class="step-num">3</div><span><strong>Each GPU computes gradients independently.</strong> Backward pass gives each GPU its own gradient tensor, with different values.</span></li>
+  <li><div class="step-num">4</div><span><strong>All-Reduce averages the gradients.</strong> Every GPU sends its gradients and receives the mean. All GPUs now have identical gradients.</span></li>
+  <li><div class="step-num">5</div><span><strong>Every GPU applies the same optimizer step.</strong> Since gradients are identical after All-Reduce, all GPUs update their weights the same way. All weights stay in sync.</span></li>
+</ul>
+
+<div class="callout">
+  <strong>DDP overlaps communication and computation.</strong> PyTorch DDP does not wait until the entire backward pass finishes before starting the All-Reduce. As soon as a parameter's gradient is ready, DDP starts reducing it while the backward pass continues on other parameters. This overlap hides most of the communication latency.
+</div>
+
+<pre><code>import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+dist.init_process_group("nccl")
+rank = dist.get_rank()
+torch.cuda.set_device(rank)
+
+model = MyModel().cuda()
+model = DDP(model, device_ids=[rank])   # wraps model, installs backward hooks
+
+# Standard training loop — all-reduce happens automatically inside DDP
+optimizer = torch.optim.AdamW(model.parameters())
+for batch in dataloader:
+    loss = model(batch).mean()
+    loss.backward()     # ← All-Reduce fires here automatically
+    optimizer.step()
+    optimizer.zero_grad()</code></pre>
+</section>
+
+<!-- ================================================================ -->
+<section id="fsdp2-use">
+<h2>13. Used In: FSDP2 (Fully Sharded Data Parallel)</h2>
+<span class="tag green">All-Gather</span>
+<span class="tag orange">Reduce-Scatter</span>
+
+<p>FSDP2 takes a different approach than DDP. Instead of each GPU holding a full copy of the model (expensive memory), FSDP2 <em>shards</em> the parameters across all GPUs. Each GPU only stores 1/N of each parameter. This is much more memory efficient for large models.</p>
+
+<p>The tradeoff: you need to <em>reconstruct</em> the full parameters before each forward/backward pass (via All-Gather), and you need to <em>shard back</em> the gradients after the backward pass (via Reduce-Scatter).</p>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">FSDP2: parameter lifecycle per training step</div>
+  <div id="d-fsdp2"></div>
+</div>
+
+<h3>The detailed flow</h3>
+<ul class="steps">
+  <li><div class="step-num">1</div><span><strong>Parameters are stored as shards.</strong> Each GPU holds shard W₀, W₁, W₂, or W₃ of the full weight matrix W = [W₀,W₁,W₂,W₃]. This is the memory-efficient resting state.</span></li>
+  <li><div class="step-num">2</div><span><strong>All-Gather before forward.</strong> Before computing the forward pass of a layer, FSDP2 all-gathers all shards so every GPU temporarily has the full weight W. This happens layer by layer (not all layers at once), keeping peak memory low.</span></li>
+  <li><div class="step-num">3</div><span><strong>Forward pass runs normally.</strong> Each GPU computes its full forward pass (same model weights, different data per GPU). Activations are stored for backward.</span></li>
+  <li><div class="step-num">4</div><span><strong>Free the full weight.</strong> After the forward pass of a layer is done, the full (all-gathered) weight is discarded. Only the shard remains. Memory is reclaimed.</span></li>
+  <li><div class="step-num">5</div><span><strong>All-Gather again during backward.</strong> To compute gradients, the full weight is needed again. FSDP2 all-gathers it again during the backward pass (pre-fetching the next layer's weights while the current layer's gradient is being computed to overlap communication and compute).</span></li>
+  <li><div class="step-num">6</div><span><strong>Reduce-Scatter for gradients.</strong> Each GPU computed gradients w.r.t. the full weight matrix. Reduce-Scatter sums these gradients across GPUs and immediately shards the result. Each GPU ends up with the gradient shard for its weight shard.</span></li>
+  <li><div class="step-num">7</div><span><strong>Optimizer step on shards.</strong> Each GPU updates only its own weight shard using the gradient shard. No cross-GPU communication needed.</span></li>
+</ul>
+
+<div class="callout orange">
+  <strong>Why Reduce-Scatter instead of All-Reduce?</strong> DDP uses All-Reduce because it needs every GPU to have the full gradient (to update the full model). FSDP2 uses Reduce-Scatter because after the gradient is reduced, each GPU only needs the gradient for <em>its own shard</em>. Reduce-Scatter gives you the reduction AND the sharding in one step. It uses half the bandwidth of All-Reduce + discard.
+</div>
+
+<pre><code>from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+
+# Apply layer-by-layer, then the root
+for layer in model.layers:
+    fully_shard(layer, mesh=dp_mesh)     # each layer all-gathers and reduce-scatters independently
+fully_shard(model, mesh=dp_mesh)
+
+# Training loop -- FSDP2 handles all-gather and reduce-scatter automatically
+for batch in dataloader:
+    loss = model(batch).mean()
+    loss.backward()       # ← reduce-scatter fires here for each layer
+    optimizer.step()      # ← updates only local shards
+    optimizer.zero_grad()</code></pre>
+</section>
+
+<!-- ================================================================ -->
+<section id="tp-use">
+<h2>14. Used In: Tensor Parallel</h2>
+<span class="tag green">All-Reduce (basic TP)</span>
+<span class="tag orange">Reduce-Scatter + All-Gather (Sequence Parallel)</span>
+
+<p>Tensor Parallel shards individual weight matrices across GPUs. The communication pattern depends on whether you are using basic TP or Sequence Parallel.</p>
+
+<h3>Basic TP: ColwiseParallel + RowwiseParallel</h3>
+
+<p>In a typical MLP (W1 then W2), the communication happens like this:</p>
+
+<ul style="padding-left:24px;margin-bottom:16px">
+  <li><strong>Before W1 (ColwiseParallel)</strong>: no communication needed. The input is replicated across all GPUs (everyone already has it).</li>
+  <li><strong>W1 forward</strong>: each GPU computes a partial output (its column shard of W1 times the full input). Output is sharded on the last dimension.</li>
+  <li><strong>After W2 (RowwiseParallel)</strong>: each GPU has computed a partial result. An All-Reduce sums the partial results. Now every GPU has the correct full output.</li>
+</ul>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">TP (basic): All-Reduce after RowwiseParallel</div>
+  <div id="d-tp-basic"></div>
+</div>
+
+<h3>Sequence Parallel: Reduce-Scatter + All-Gather</h3>
+
+<p>Basic TP keeps activations between blocks fully replicated on every GPU (wasteful for memory). Sequence Parallel instead keeps activations sharded on the sequence dimension. This requires a different communication pattern at module boundaries:</p>
+
+<ul style="padding-left:24px;margin-bottom:16px">
+  <li><strong>Between transformer blocks</strong>: activations are sequence-sharded [B, S/N, D] on each GPU. This saves memory.</li>
+  <li><strong>Before Attention/FFN</strong>: All-Gather reconstructs the full sequence [B, S, D]. (Needed because attention needs the full sequence to compute.)</li>
+  <li><strong>After wo/w2 (RowwiseParallel)</strong>: instead of All-Reduce → Replicate, we use Reduce-Scatter → Shard(seq). Output is sequence-sharded again.</li>
+</ul>
+
+<div class="callout purple">
+  <strong>Sequence Parallel replaces one All-Reduce with one All-Gather + one Reduce-Scatter.</strong> The total communication volume is the same, but now the activations between blocks are sequence-sharded instead of replicated. With a 4-GPU TP group, activation memory between blocks is reduced by 4x.
+</div>
+
+<div class="diagram-wrap">
+  <div class="diagram-title">TP with Sequence Parallel: Reduce-Scatter (not all-reduce) after RowwiseParallel</div>
+  <div id="d-tp-sp"></div>
+</div>
+
+<pre><code>from torch.distributed.tensor.parallel import (
+    ColwiseParallel, RowwiseParallel, SequenceParallel,
+    PrepareModuleInput, parallelize_module
+)
+from torch.distributed.tensor import Shard
+
+# Basic TP: one all-reduce per sub-layer
+basic_plan = {
+    "attention.wq": ColwiseParallel(use_local_output=False),
+    "attention.wo": RowwiseParallel(),              # ← all-reduce fires here
+    "feed_forward.w1": ColwiseParallel(),
+    "feed_forward.w2": RowwiseParallel(),           # ← all-reduce fires here
+}
+
+# Sequence Parallel: reduce-scatter instead of all-reduce
+sp_plan = {
+    "attention_norm": SequenceParallel(),           # activations stay sharded
+    "attention":      PrepareModuleInput(           # all-gather before attention
+        input_layouts=(Shard(1),),
+        desired_input_layouts=(Replicate(),)),
+    "attention.wq": ColwiseParallel(use_local_output=False),
+    "attention.wo": RowwiseParallel(                # ← reduce-scatter (not all-reduce)
+        output_layouts=Shard(1)),
+    "ffn_norm":       SequenceParallel(),
+    "feed_forward":   PrepareModuleInput(           # all-gather before FFN
+        input_layouts=(Shard(1),),
+        desired_input_layouts=(Replicate(),)),
+    "feed_forward.w2": RowwiseParallel(             # ← reduce-scatter
+        output_layouts=Shard(1)),
+}</code></pre>
+</section>
+
+<!-- ================================================================ -->
+<section id="cheatsheet">
+<h2>15. Quick Reference</h2>
+
+<table class="ref-table">
+<thead>
+  <tr>
+    <th>Operation</th>
+    <th>Who contributes</th>
+    <th>Who gets result</th>
+    <th>What the result is</th>
+    <th>Used in</th>
+  </tr>
+</thead>
+<tbody>
+  <tr>
+    <td>Send / Recv</td>
+    <td>One sender</td>
+    <td>One receiver</td>
+    <td>Exact copy of sender's data</td>
+    <td>Pipeline Parallel</td>
+  </tr>
+  <tr>
+    <td>Broadcast</td>
+    <td>Root rank</td>
+    <td>All ranks</td>
+    <td>Identical copy of root's data</td>
+    <td>Model weight init sync</td>
+  </tr>
+  <tr>
+    <td>Scatter</td>
+    <td>Root rank</td>
+    <td>Each rank gets different slice</td>
+    <td>Different chunk per rank (split of root's data)</td>
+    <td>Rarely used directly</td>
+  </tr>
+  <tr>
+    <td>Gather</td>
+    <td>All ranks</td>
+    <td>Root rank only</td>
+    <td>All chunks concatenated (only on root)</td>
+    <td>Logging, evaluation</td>
+  </tr>
+  <tr>
+    <td>All-Gather</td>
+    <td>All ranks</td>
+    <td>All ranks</td>
+    <td>All chunks concatenated (on every rank)</td>
+    <td>FSDP2 forward, TP Sequence Parallel</td>
+  </tr>
+  <tr>
+    <td>Reduce</td>
+    <td>All ranks</td>
+    <td>Root rank only</td>
+    <td>Sum/mean/max of all values (only on root)</td>
+    <td>Computing global metrics</td>
+  </tr>
+  <tr>
+    <td>All-Reduce</td>
+    <td>All ranks</td>
+    <td>All ranks</td>
+    <td>Sum/mean/max of all values (on every rank)</td>
+    <td>DDP gradients, TP RowwiseParallel</td>
+  </tr>
+  <tr>
+    <td>Reduce-Scatter</td>
+    <td>All ranks</td>
+    <td>Each rank gets one shard</td>
+    <td>Each rank's shard is sum across all ranks for that position</td>
+    <td>FSDP2 backward, TP Sequence Parallel</td>
+  </tr>
+</tbody>
+</table>
+
+<div class="callout" style="margin-top:28px">
+  <strong>The fundamental identity:</strong>
+  <br><code>All-Reduce = Reduce-Scatter + All-Gather</code>
+  <br>FSDP2 and Sequence Parallel intentionally stop after Reduce-Scatter (skip the All-Gather) to keep data sharded and save memory.
+</div>
+
+<div class="callout orange" style="margin-top:16px">
+  <strong>Bandwidth cost summary</strong> (for tensor of size S, N GPUs):
+  <br>All-Reduce: <code>2 × S × (N-1)/N</code> per GPU
+  <br>All-Gather: <code>S × (N-1)/N</code> per GPU
+  <br>Reduce-Scatter: <code>S × (N-1)/N</code> per GPU
+  <br>All-Gather + Reduce-Scatter together = same as All-Reduce.
+</div>
+</section>
+
+</div><!-- .page -->
+
+<script>
+// =========================================================
+// SVG Diagram Engine
+// =========================================================
+
+const C = {
+  A: '#3B82F6',     // blue
+  B: '#F97316',     // orange
+  C: '#22C55E',     // green
+  D: '#EAB308',     // amber
+  SUM: '#8B5CF6',   // purple - reduced single value
+  SA: '#3B82F6',    // same as A, but label says ΣA
+  SB: '#F97316',
+  SC: '#22C55E',
+  SD: '#EAB308',
+  EMPTY: null,
+};
+
+// Each rank's state is described as an array of chunk descriptors.
+// A chunk descriptor is one of:
+//   'A','B','C','D'       - plain colored chunk
+//   'SUM'                 - purple, labeled "Σ"
+//   'SA','SB','SC','SD'   - colored, labeled "ΣA"/"ΣB"/etc.
+//   'ABCD'                - 4 stripes A/B/C/D (concatenated result)
+//   null                  - empty slot
+//   {color, label}        - custom
+
+const CHUNK_COLORS = { A: C.A, B: C.B, C: C.C, D: C.D, SUM: C.SUM, SA: C.SA, SB: C.SB, SC: C.SC, SD: C.SD };
+const CHUNK_LABELS = { A:'A', B:'B', C:'C', D:'D', SUM:'Σ', SA:'ΣA', SB:'ΣB', SC:'ΣC', SD:'ΣD' };
+
+function svgNS(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+  return el;
+}
+
+function makeSVG(w, h) {
+  const s = svgNS('svg', { viewBox: `0 0 ${w} ${h}`, width: '100%', style: 'display:block' });
+  return s;
+}
+
+// Draw a GPU box. Returns the {x,y,dx,dy,dw,dh} where dx,dy is top-left of data area.
+function drawGPU(svg, x, y, rank, w=82, h=102) {
+  const fill = '#0C1420';
+  const stroke = '#1E3A55';
+  // Outer box
+  svg.appendChild(svgNS('rect', { x, y, width: w, height: h, rx: 6, fill, stroke, 'stroke-width': 1.5 }));
+  // Header bg
+  svg.appendChild(svgNS('rect', { x, y, width: w, height: 22, rx: 6, fill: '#0F1E32' }));
+  svg.appendChild(svgNS('rect', { x, y: y+16, width: w, height: 6, fill: '#0F1E32' }));
+  // Divider
+  svg.appendChild(svgNS('line', { x1: x, y1: y+22, x2: x+w, y2: y+22, stroke:'#1A2E44', 'stroke-width':'1' }));
+  // Rank label
+  const lbl = svgNS('text', { x: x+w/2, y: y+15, 'text-anchor':'middle', fill:'#4A6480', 'font-size':'9', 'font-family':'JetBrains Mono, monospace' });
+  lbl.textContent = `GPU ${rank}`;
+  svg.appendChild(lbl);
+  // Data area: 5px padding inside, starting y+26
+  return { x, y, dx: x+5, dy: y+26, dw: w-10, dh: h-32 };
+}
+
+// Draw chunk(s) inside a data area.
+// chunks: array of chunk keys (like ['A']) or ['ABCD'] or ['SUM'] or [null]
+function drawChunks(svg, dx, dy, dw, dh, chunks) {
+  if (!chunks || chunks.length === 0 || (chunks.length === 1 && chunks[0] === null)) {
+    // Empty: show a dash
+    const t = svgNS('text', { x: dx+dw/2, y: dy+dh/2+4, 'text-anchor':'middle', fill:'#243448', 'font-size':'18', 'font-family':'JetBrains Mono, monospace' });
+    t.textContent = '—';
+    svg.appendChild(t);
+    return;
+  }
+
+  const n = chunks.length;
+  const gap = n > 1 ? 2 : 0;
+  const chunkH = (dh - gap*(n-1)) / n;
+
+  chunks.forEach((key, i) => {
+    const cy = dy + i * (chunkH + gap);
+
+    if (key === 'ABCD') {
+      // 4 horizontal color stripes
+      const stripes = ['A','B','C','D'];
+      const sh = (chunkH - 3) / 4;
+      stripes.forEach((s, si) => {
+        svg.appendChild(svgNS('rect', { x: dx, y: cy + si*(sh+1), width: dw, height: sh, rx: 2, fill: CHUNK_COLORS[s] }));
+      });
+      // Label overlay
+      const t = svgNS('text', { x: dx+dw/2, y: cy+chunkH/2+4, 'text-anchor':'middle', fill:'rgba(255,255,255,0.85)', 'font-size':'9', 'font-family':'JetBrains Mono, monospace', 'font-weight':'600' });
+      t.textContent = '[A,B,C,D]';
+      svg.appendChild(t);
+      return;
+    }
+
+    if (key === null) {
+      // Empty slot within multi-chunk
+      svg.appendChild(svgNS('rect', { x: dx, y: cy, width: dw, height: chunkH, rx: 2, fill: '#0D1A28' }));
+      return;
+    }
+
+    const color = (typeof key === 'object') ? key.color : CHUNK_COLORS[key];
+    const label = (typeof key === 'object') ? key.label : CHUNK_LABELS[key];
+
+    if (!color) {
+      svg.appendChild(svgNS('rect', { x: dx, y: cy, width: dw, height: chunkH, rx: 2, fill: '#0D1A28' }));
+      return;
+    }
+
+    // Background glow
+    svg.appendChild(svgNS('rect', { x: dx, y: cy, width: dw, height: chunkH, rx: 3, fill: color, opacity: '0.9' }));
+    // Subtle inner light
+    svg.appendChild(svgNS('rect', { x: dx, y: cy, width: dw, height: Math.min(chunkH*0.4, 8), rx: 3, fill: 'rgba(255,255,255,0.08)' }));
+
+    const fontSize = chunkH > 40 ? 18 : chunkH > 25 ? 13 : chunkH > 15 ? 11 : 9;
+    const t = svgNS('text', {
+      x: dx+dw/2,
+      y: cy+chunkH/2 + (fontSize > 12 ? 5 : 4),
+      'text-anchor': 'middle',
+      fill: 'white',
+      'font-size': String(fontSize),
+      'font-family': 'JetBrains Mono, monospace',
+      'font-weight': '600'
+    });
+    t.textContent = label || '';
+    svg.appendChild(t);
+  });
+}
+
+// Draw section label
+function drawLabel(svg, x, y, text, color='#3B5A7A', size=10) {
+  const t = svgNS('text', { x, y, 'text-anchor':'middle', fill: color, 'font-size': String(size), 'font-family':'JetBrains Mono, monospace', 'letter-spacing':'0.08em' });
+  t.textContent = text;
+  svg.appendChild(t);
+}
+
+// Draw arrow
+function drawArrow(svg, x1, y1, x2, y2, color='#60A5FA', w=2.5, markerId='ah-blue') {
+  svg.appendChild(svgNS('line', { x1, y1, x2, y2, stroke: color, 'stroke-width': w, 'marker-end': `url(#${markerId})` }));
+}
+
+// Draw curved communication arrow (path between two GPU tops/bottoms)
+function drawCommArrow(svg, x1, y1, x2, y2, cpY, color='#3B82F6', markerId='ah-blue') {
+  const mid = (x1+x2)/2;
+  const d = `M ${x1} ${y1} Q ${mid} ${cpY} ${x2} ${y2}`;
+  svg.appendChild(svgNS('path', { d, stroke: color, 'stroke-width': 1.5, fill: 'none', opacity: '0.7', 'marker-end': `url(#${markerId})` }));
+}
+
+// Main diagram builder: before/after layout with optional comm arrows
+// config: {
+//   svgW, svgH,
+//   before: [ [chunks for rank0], [chunks for rank1], ... ] (4 ranks)
+//   after:  [ [chunks for rank0], ... ]
+//   commArrows: [{from, to}] optional
+// }
+function makeCollectiveDiagram(containerId, config) {
+  const {
+    svgH = 182,
+    before,
+    after,
+    commArrows = [],
+    beforeLabel = 'BEFORE',
+    afterLabel = 'AFTER',
+  } = config;
+
+  const N = before.length;
+  const gpuW = 82, gpuH = 102;
+  const gap = 10;
+  const groupW = N * gpuW + (N-1) * gap;
+  const leftStart = 12;
+  const arrowZoneW = 64;
+  const rightStart = leftStart + groupW + arrowZoneW;
+  const svgW = rightStart + groupW + 12;
+  const gpuY = 32;
+
+  const svg = makeSVG(svgW, svgH);
+
+  // Section labels
+  drawLabel(svg, leftStart + groupW/2, 20, beforeLabel, '#3B5A7A', 10);
+  drawLabel(svg, rightStart + groupW/2, 20, afterLabel, '#3B5A7A', 10);
+
+  // Big center arrow
+  const arrowMidY = gpuY + gpuH/2;
+  const arrowX1 = leftStart + groupW + 10;
+  const arrowX2 = rightStart - 10;
+  drawArrow(svg, arrowX1, arrowMidY, arrowX2, arrowMidY, '#60A5FA', 2.5, 'ah-blue');
+
+  // Before GPUs
+  const beforeBoxes = [];
+  for (let i = 0; i < N; i++) {
+    const bx = leftStart + i * (gpuW + gap);
+    const box = drawGPU(svg, bx, gpuY, i, gpuW, gpuH);
+    drawChunks(svg, box.dx, box.dy, box.dw, box.dh, before[i]);
+    beforeBoxes.push(box);
+  }
+
+  // After GPUs
+  for (let i = 0; i < N; i++) {
+    const ax = rightStart + i * (gpuW + gap);
+    const box = drawGPU(svg, ax, gpuY, i, gpuW, gpuH);
+    drawChunks(svg, box.dx, box.dy, box.dw, box.dh, after[i]);
+  }
+
+  // Communication arrows below before-group
+  if (commArrows.length > 0) {
+    const baseY = gpuY + gpuH;
+    commArrows.forEach(({ from, to }, idx) => {
+      const x1 = leftStart + from*(gpuW+gap) + gpuW/2;
+      const x2 = leftStart + to*(gpuW+gap) + gpuW/2;
+      const depth = Math.abs(to - from);
+      const cpY = baseY + 14 + depth * 16;
+      drawCommArrow(svg, x1, baseY + 2, x2, baseY + 2, cpY, '#60A5FA', 'ah-blue');
+    });
+  }
+
+  document.getElementById(containerId).appendChild(svg);
+}
+
+// ================================================================
+// Now generate each diagram
+// ================================================================
+
+// Data model example
+makeCollectiveDiagram('d-data-model', {
+  svgH: 165,
+  before: [['A'], ['B'], ['C'], ['D']],
+  after:  [['A'], ['B'], ['C'], ['D']],
+  beforeLabel: 'GPU RANKS',
+  afterLabel:  '(SAME DATA)',
+});
+
+// Point-to-point: GPU1 sends B to GPU3
+(function() {
+  const svg = makeSVG(500, 165);
+  const gpuW = 82, gpuH = 102, gpuY = 32;
+  const positions = [12, 104, 196, 288];
+  const ranks = ['A', 'B', 'C', 'D'];
+  positions.forEach((bx, i) => {
+    const box = drawGPU(svg, bx, gpuY, i, gpuW, gpuH);
+    drawChunks(svg, box.dx, box.dy, box.dw, box.dh, [ranks[i]]);
+  });
+
+  // Arrow from GPU1 bottom to GPU3 bottom
+  const x1 = positions[1] + gpuW/2;
+  const x2 = positions[3] + gpuW/2;
+  const baseY = gpuY + gpuH;
+  const d = `M ${x1} ${baseY+2} C ${x1} ${baseY+45} ${x2} ${baseY+45} ${x2} ${baseY+2}`;
+  svg.appendChild(svgNS('path', { d, stroke: '#F97316', 'stroke-width': 2, fill: 'none', 'marker-end': 'url(#ah-orange)' }));
+
+  // Label on arrow
+  const lbl = svgNS('text', { x: (x1+x2)/2, y: baseY+38, 'text-anchor':'middle', fill: '#F97316', 'font-size':'10', 'font-family':'JetBrains Mono, monospace' });
+  lbl.textContent = 'send B';
+  svg.appendChild(lbl);
+
+  // Note boxes
+  const noteY = 8;
+  const note1 = svgNS('text', { x: positions[1]+gpuW/2, y: noteY, 'text-anchor':'middle', fill:'#F97316', 'font-size':'9', 'font-family':'JetBrains Mono, monospace' });
+  note1.textContent = 'sender';
+  svg.appendChild(note1);
+  const note2 = svgNS('text', { x: positions[3]+gpuW/2, y: noteY, 'text-anchor':'middle', fill:'#F97316', 'font-size':'9', 'font-family':'JetBrains Mono, monospace' });
+  note2.textContent = 'receiver';
+  svg.appendChild(note2);
+
+  document.getElementById('d-p2p').appendChild(svg);
+})();
+
+// Broadcast
+makeCollectiveDiagram('d-broadcast', {
+  svgH: 185,
+  before: [['A'], [null], [null], [null]],
+  after:  [['A'], ['A'], ['A'], ['A']],
+  commArrows: [
+    { from: 0, to: 1 },
+    { from: 0, to: 2 },
+    { from: 0, to: 3 },
+  ],
+});
+
+// Scatter
+makeCollectiveDiagram('d-scatter', {
+  svgH: 165,
+  before: [['ABCD'], [null], [null], [null]],
+  after:  [['A'], ['B'], ['C'], ['D']],
+  commArrows: [
+    { from: 0, to: 1 },
+    { from: 0, to: 2 },
+    { from: 0, to: 3 },
+  ],
+});
+
+// Gather
+makeCollectiveDiagram('d-gather', {
+  svgH: 185,
+  before: [['A'], ['B'], ['C'], ['D']],
+  after:  [['ABCD'], [null], [null], [null]],
+  commArrows: [
+    { from: 1, to: 0 },
+    { from: 2, to: 0 },
+    { from: 3, to: 0 },
+  ],
+});
+
+// All-Gather
+makeCollectiveDiagram('d-all-gather', {
+  svgH: 165,
+  before: [['A'], ['B'], ['C'], ['D']],
+  after:  [['ABCD'], ['ABCD'], ['ABCD'], ['ABCD']],
+  commArrows: [
+    { from: 0, to: 1 }, { from: 0, to: 2 }, { from: 0, to: 3 },
+    { from: 1, to: 0 }, { from: 1, to: 2 }, { from: 1, to: 3 },
+    { from: 2, to: 0 }, { from: 2, to: 1 }, { from: 2, to: 3 },
+    { from: 3, to: 0 }, { from: 3, to: 1 }, { from: 3, to: 2 },
+  ],
+});
+
+// Reduce
+makeCollectiveDiagram('d-reduce', {
+  svgH: 185,
+  before: [['A'], ['B'], ['C'], ['D']],
+  after:  [['SUM'], [null], [null], [null]],
+  commArrows: [
+    { from: 1, to: 0 },
+    { from: 2, to: 0 },
+    { from: 3, to: 0 },
+  ],
+});
+
+// All-Reduce
+makeCollectiveDiagram('d-all-reduce', {
+  svgH: 165,
+  before: [['A'], ['B'], ['C'], ['D']],
+  after:  [['SUM'], ['SUM'], ['SUM'], ['SUM']],
+});
+
+// Reduce-Scatter
+makeCollectiveDiagram('d-reduce-scatter', {
+  svgH: 165,
+  before: [['ABCD'], ['ABCD'], ['ABCD'], ['ABCD']],
+  after:  [['SA'], ['SB'], ['SC'], ['SD']],
+});
+
+// ================================================================
+// Ring topology diagram
+// ================================================================
+(function() {
+  const W = 400, H = 280;
+  const svg = makeSVG(W, H);
+  const cx = W/2, cy = H/2;
+  const r = 90;
+
+  // GPU positions (top, right, bottom, left)
+  const positions = [
+    { angle: -90, label: 0 },  // top
+    { angle: 0,   label: 1 },  // right
+    { angle: 90,  label: 2 },  // bottom
+    { angle: 180, label: 3 },  // left
+  ];
+
+  const gpuW = 60, gpuH = 48;
+  const gpuCenters = positions.map(p => {
+    const rad = p.angle * Math.PI / 180;
+    return {
+      x: cx + r * Math.cos(rad),
+      y: cy + r * Math.sin(rad),
+      rank: p.label,
+    };
+  });
+
+  // Draw ring arrows (between adjacent GPUs, curving outward)
+  // 0->1, 1->2, 2->3, 3->0 (clockwise)
+  const arrowColor = '#3B82F6';
+  for (let i = 0; i < 4; i++) {
+    const src = gpuCenters[i];
+    const dst = gpuCenters[(i+1) % 4];
+    // Control point: slightly outward from mid
+    const midX = (src.x + dst.x)/2;
+    const midY = (src.y + dst.y)/2;
+    const outX = midX + (midX - cx) * 0.3;
+    const outY = midY + (midY - cy) * 0.3;
+    const d = `M ${src.x} ${src.y} Q ${outX} ${outY} ${dst.x} ${dst.y}`;
+    svg.appendChild(svgNS('path', { d, stroke: arrowColor, 'stroke-width': 1.8, fill: 'none', opacity: '0.6', 'marker-end': 'url(#ah-blue)' }));
+  }
+
+  // Draw GPU boxes centered at each position
+  gpuCenters.forEach(g => {
+    const bx = g.x - gpuW/2;
+    const by = g.y - gpuH/2;
+    svg.appendChild(svgNS('rect', { x: bx, y: by, width: gpuW, height: gpuH, rx: 6, fill: '#0C1420', stroke: '#1E3A55', 'stroke-width': 1.5 }));
+    svg.appendChild(svgNS('rect', { x: bx, y: by, width: gpuW, height: 16, rx: 6, fill: '#0F1E32' }));
+    svg.appendChild(svgNS('rect', { x: bx, y: by+10, width: gpuW, height: 6, fill: '#0F1E32' }));
+    svg.appendChild(svgNS('line', { x1: bx, y1: by+16, x2: bx+gpuW, y2: by+16, stroke: '#1A2E44', 'stroke-width': 1 }));
+    const lbl = svgNS('text', { x: g.x, y: by+12, 'text-anchor':'middle', fill:'#4A6480', 'font-size':'9', 'font-family':'JetBrains Mono, monospace' });
+    lbl.textContent = `GPU ${g.rank}`;
+    svg.appendChild(lbl);
+
+    const colors = [C.A, C.B, C.C, C.D];
+    const labels = ['A','B','C','D'];
+    const chunkRx = bx + 4, chunkRy = by + 20, chunkW = gpuW - 8, chunkH = gpuH - 24;
+    svg.appendChild(svgNS('rect', { x: chunkRx, y: chunkRy, width: chunkW, height: chunkH, rx: 3, fill: colors[g.rank], opacity: '0.9' }));
+    const ct = svgNS('text', { x: g.x, y: chunkRy + chunkH/2 + 5, 'text-anchor':'middle', fill:'white', 'font-size':'14', 'font-family':'JetBrains Mono, monospace', 'font-weight':'600' });
+    ct.textContent = labels[g.rank];
+    svg.appendChild(ct);
+  });
+
+  // "RING" label
+  const ringLbl = svgNS('text', { x: cx, y: cy+5, 'text-anchor':'middle', fill:'#243448', 'font-size':'11', 'font-family':'JetBrains Mono, monospace', 'letter-spacing':'0.15em' });
+  ringLbl.textContent = 'RING';
+  svg.appendChild(ringLbl);
+
+  document.getElementById('d-ring-topology').appendChild(svg);
+})();
+
+// ================================================================
+// Ring All-Reduce Phase 1 (Reduce-Scatter steps)
+// ================================================================
+(function() {
+  // Show 3 steps of reduce-scatter around a ring of 4 GPUs.
+  // Initially: each GPU has [a, b, c, d] (4 chunks)
+  // After step 1: partial sums for one position
+  // After step 2: more partial sums
+  // After step 3: each GPU has fully-reduced shard
+  //
+  // We show: Step 0 (initial) | Step 1 | Step 2 | Step 3
+  //
+  // Simplified 4-GPU horizontal display for each step:
+  // Step 0: GPU0=[A0,B0,C0,D0], GPU1=[A1,B1,C1,D1], GPU2=[A2,B2,C2,D2], GPU3=[A3,B3,C3,D3]
+  // Step 1: GPU0=[A01,B0,C0,D3], GPU1=[A1,B01,C1,D0], GPU2=[A2,B1,C02,D1], GPU3=[A3,B2,C1,D03]
+  //   (each passes one chunk to the right)
+  // ...
+  // Step 3: GPU0=[SA], GPU1=[SB], GPU2=[SC], GPU3=[SD]
+  //
+  // For visual simplicity, I'll show this as 4 separate GPU rows with labels.
+
+  const W = 800, H = 240;
+  const svg = makeSVG(W, H);
+
+  const stepGpuW = 70, stepGpuH = 85, gpuGap = 8;
+  const stepGroupW = 4*stepGpuW + 3*gpuGap;
+  const stepGap = 24;
+  const totalW = 4*stepGroupW + 3*stepGap;
+  const startX = (W - totalW) / 2;
+
+  // Step labels and data for each step
+  const steps = [
+    {
+      label: 'Start',
+      data: [
+        [{color:'#3B82F6',label:'A₀'},{color:'#F97316',label:'B₀'},{color:'#22C55E',label:'C₀'},{color:'#EAB308',label:'D₀'}],
+        [{color:'#3B82F6',label:'A₁'},{color:'#F97316',label:'B₁'},{color:'#22C55E',label:'C₁'},{color:'#EAB308',label:'D₁'}],
+        [{color:'#3B82F6',label:'A₂'},{color:'#F97316',label:'B₂'},{color:'#22C55E',label:'C₂'},{color:'#EAB308',label:'D₂'}],
+        [{color:'#3B82F6',label:'A₃'},{color:'#F97316',label:'B₃'},{color:'#22C55E',label:'C₃'},{color:'#EAB308',label:'D₃'}],
+      ]
+    },
+    {
+      label: 'Step 1',
+      data: [
+        [{color:'#A78BFA',label:'ΣA₀₃'},{color:'#F97316',label:'B₀'},{color:'#22C55E',label:'C₀'},{color:'#EAB308',label:'D₀'}],
+        [{color:'#3B82F6',label:'A₁'},{color:'#A78BFA',label:'ΣB₀₁'},{color:'#22C55E',label:'C₁'},{color:'#EAB308',label:'D₁'}],
+        [{color:'#3B82F6',label:'A₂'},{color:'#F97316',label:'B₂'},{color:'#A78BFA',label:'ΣC₁₂'},{color:'#EAB308',label:'D₂'}],
+        [{color:'#3B82F6',label:'A₃'},{color:'#F97316',label:'B₃'},{color:'#22C55E',label:'C₃'},{color:'#A78BFA',label:'ΣD₂₃'}],
+      ]
+    },
+    {
+      label: 'Step 2',
+      data: [
+        [{color:'#A78BFA',label:'ΣA₀₃'},{color:'#F97316',label:'B₀'},{color:'#22C55E',label:'C₀'},{color:'#A855F7',label:'ΣD₂₃₀'}],
+        [{color:'#A855F7',label:'ΣA₀₁₃'},{color:'#A78BFA',label:'ΣB₀₁'},{color:'#22C55E',label:'C₁'},{color:'#EAB308',label:'D₁'}],
+        [{color:'#3B82F6',label:'A₂'},{color:'#A855F7',label:'ΣB₀₁₂'},{color:'#A78BFA',label:'ΣC₁₂'},{color:'#EAB308',label:'D₂'}],
+        [{color:'#3B82F6',label:'A₃'},{color:'#F97316',label:'B₃'},{color:'#A855F7',label:'ΣC₁₂₃'},{color:'#A78BFA',label:'ΣD₂₃'}],
+      ]
+    },
+    {
+      label: 'Step 3\n(done)',
+      data: [
+        [{color:'#3B82F6',label:'ΣA'}],
+        [{color:'#F97316',label:'ΣB'}],
+        [{color:'#22C55E',label:'ΣC'}],
+        [{color:'#EAB308',label:'ΣD'}],
+      ]
+    },
+  ];
+
+  steps.forEach((step, si) => {
+    const stepX = startX + si*(stepGroupW + stepGap);
+
+    // Step label
+    const lblLines = step.label.split('\n');
+    lblLines.forEach((line, li) => {
+      const t = svgNS('text', { x: stepX + stepGroupW/2, y: 12 + li*12, 'text-anchor':'middle', fill: si===3 ? '#22C55E' : '#4A6480', 'font-size':'9', 'font-family':'JetBrains Mono, monospace' });
+      t.textContent = line;
+      svg.appendChild(t);
+    });
+
+    // 4 GPU boxes side by side
+    for (let ri = 0; ri < 4; ri++) {
+      const bx = stepX + ri*(stepGpuW+gpuGap);
+      const by = 28;
+
+      // GPU box
+      svg.appendChild(svgNS('rect', { x: bx, y: by, width: stepGpuW, height: stepGpuH, rx: 5, fill: '#0C1420', stroke: '#1E3A55', 'stroke-width': 1.2 }));
+      svg.appendChild(svgNS('rect', { x: bx, y: by, width: stepGpuW, height: 16, rx: 5, fill: '#0F1E32' }));
+      svg.appendChild(svgNS('rect', { x: bx, y: by+10, width: stepGpuW, height: 6, fill: '#0F1E32' }));
+      svg.appendChild(svgNS('line', { x1: bx, y1: by+16, x2: bx+stepGpuW, y2: by+16, stroke:'#1A2E44', 'stroke-width':1 }));
+      const gl = svgNS('text', { x: bx+stepGpuW/2, y: by+12, 'text-anchor':'middle', fill:'#3A5268', 'font-size':'8', 'font-family':'JetBrains Mono, monospace' });
+      gl.textContent = `G${ri}`;
+      svg.appendChild(gl);
+
+      // Chunks inside
+      const chunks = step.data[ri];
+      const dy2 = by+18;
+      const dh2 = stepGpuH - 20;
+      const dw2 = stepGpuW - 8;
+      const n = chunks.length;
+      const gapInner = n > 1 ? 1 : 0;
+      const cH = (dh2 - gapInner*(n-1)) / n;
+
+      chunks.forEach((chunk, ci) => {
+        const cy2 = dy2 + ci*(cH+gapInner);
+        svg.appendChild(svgNS('rect', { x: bx+4, y: cy2, width: dw2, height: cH, rx: 2, fill: chunk.color, opacity: '0.9' }));
+        const fSize = cH > 18 ? 10 : 8;
+        const ct = svgNS('text', { x: bx+4+dw2/2, y: cy2+cH/2+fSize*0.35, 'text-anchor':'middle', fill:'white', 'font-size':String(fSize), 'font-family':'JetBrains Mono, monospace', 'font-weight':'600' });
+        ct.textContent = chunk.label;
+        svg.appendChild(ct);
+      });
+    }
+
+    // Arrow to next step
+    if (si < steps.length - 1) {
+      const ax1 = stepX + stepGroupW + 3;
+      const ax2 = stepX + stepGroupW + stepGap - 3;
+      const ay = 28 + stepGpuH/2;
+      svg.appendChild(svgNS('line', { x1: ax1, y1: ay, x2: ax2, y2: ay, stroke:'#3B5A7A', 'stroke-width':1.5, 'marker-end':'url(#ah-dim)' }));
+    }
+  });
+
+  document.getElementById('d-ring-rs').appendChild(svg);
+})();
+
+// ================================================================
+// Ring All-Gather Phase 2
+// ================================================================
+(function() {
+  const W = 800, H = 200;
+  const svg = makeSVG(W, H);
+
+  const stepGpuW = 70, stepGpuH = 72, gpuGap = 8;
+  const stepGroupW = 4*stepGpuW + 3*gpuGap;
+  const stepGap = 24;
+  const totalW = 4*stepGroupW + 3*stepGap;
+  const startX = (W - totalW) / 2;
+
+  // After reduce-scatter: GPU0=ΣA, GPU1=ΣB, GPU2=ΣC, GPU3=ΣD
+  // They all-gather by passing chunks around. Each step one chunk propagates.
+  const steps = [
+    {
+      label: 'Start',
+      data: [
+        [{color:'#3B82F6',label:'ΣA'},{color:'#EAB308',label:'ΣD'}],
+        [{color:'#F97316',label:'ΣB'},{color:'#3B82F6',label:'ΣA'}],
+        [{color:'#22C55E',label:'ΣC'},{color:'#F97316',label:'ΣB'}],
+        [{color:'#EAB308',label:'ΣD'},{color:'#22C55E',label:'ΣC'}],
+      ]
+    },
+    {
+      label: 'Step 2',
+      data: [
+        [{color:'#3B82F6',label:'ΣA'},{color:'#22C55E',label:'ΣC'},{color:'#EAB308',label:'ΣD'}],
+        [{color:'#F97316',label:'ΣB'},{color:'#EAB308',label:'ΣD'},{color:'#3B82F6',label:'ΣA'}],
+        [{color:'#22C55E',label:'ΣC'},{color:'#3B82F6',label:'ΣA'},{color:'#F97316',label:'ΣB'}],
+        [{color:'#EAB308',label:'ΣD'},{color:'#F97316',label:'ΣB'},{color:'#22C55E',label:'ΣC'}],
+      ]
+    },
+    {
+      label: 'Step 3',
+      data: [
+        [{color:'#3B82F6',label:'ΣA'},{color:'#F97316',label:'ΣB'},{color:'#22C55E',label:'ΣC'},{color:'#EAB308',label:'ΣD'}],
+        [{color:'#3B82F6',label:'ΣA'},{color:'#F97316',label:'ΣB'},{color:'#22C55E',label:'ΣC'},{color:'#EAB308',label:'ΣD'}],
+        [{color:'#3B82F6',label:'ΣA'},{color:'#F97316',label:'ΣB'},{color:'#22C55E',label:'ΣC'},{color:'#EAB308',label:'ΣD'}],
+        [{color:'#3B82F6',label:'ΣA'},{color:'#F97316',label:'ΣB'},{color:'#22C55E',label:'ΣC'},{color:'#EAB308',label:'ΣD'}],
+      ]
+    },
+    {
+      label: 'Done!',
+      data: [
+        [{color:'#3B82F6',label:'ΣA'},{color:'#F97316',label:'ΣB'},{color:'#22C55E',label:'ΣC'},{color:'#EAB308',label:'ΣD'}],
+        [{color:'#3B82F6',label:'ΣA'},{color:'#F97316',label:'ΣB'},{color:'#22C55E',label:'ΣC'},{color:'#EAB308',label:'ΣD'}],
+        [{color:'#3B82F6',label:'ΣA'},{color:'#F97316',label:'ΣB'},{color:'#22C55E',label:'ΣC'},{color:'#EAB308',label:'ΣD'}],
+        [{color:'#3B82F6',label:'ΣA'},{color:'#F97316',label:'ΣB'},{color:'#22C55E',label:'ΣC'},{color:'#EAB308',label:'ΣD'}],
+      ]
+    },
+  ];
+
+  steps.forEach((step, si) => {
+    const stepX = startX + si*(stepGroupW + stepGap);
+    const t = svgNS('text', { x: stepX+stepGroupW/2, y: 12, 'text-anchor':'middle', fill: si===3 ? '#22C55E' : '#4A6480', 'font-size':'9', 'font-family':'JetBrains Mono, monospace' });
+    t.textContent = step.label;
+    svg.appendChild(t);
+
+    for (let ri = 0; ri < 4; ri++) {
+      const bx = stepX + ri*(stepGpuW+gpuGap);
+      const by = 22;
+      svg.appendChild(svgNS('rect', { x: bx, y: by, width: stepGpuW, height: stepGpuH, rx: 5, fill: '#0C1420', stroke: '#1E3A55', 'stroke-width': 1.2 }));
+      svg.appendChild(svgNS('rect', { x: bx, y: by, width: stepGpuW, height: 15, rx: 5, fill: '#0F1E32' }));
+      svg.appendChild(svgNS('rect', { x: bx, y: by+9, width: stepGpuW, height: 6, fill: '#0F1E32' }));
+      svg.appendChild(svgNS('line', { x1: bx, y1: by+15, x2: bx+stepGpuW, y2: by+15, stroke:'#1A2E44', 'stroke-width':1 }));
+      const gl = svgNS('text', { x: bx+stepGpuW/2, y: by+11, 'text-anchor':'middle', fill:'#3A5268', 'font-size':'8', 'font-family':'JetBrains Mono, monospace' });
+      gl.textContent = `G${ri}`;
+      svg.appendChild(gl);
+
+      const chunks = step.data[ri];
+      const dy2 = by+17, dh2 = stepGpuH-18, dw2 = stepGpuW-8;
+      const n = chunks.length, gapInner = 1;
+      const cH = (dh2 - gapInner*(n-1)) / n;
+      chunks.forEach((chunk, ci) => {
+        const cy2 = dy2 + ci*(cH+gapInner);
+        svg.appendChild(svgNS('rect', { x: bx+4, y: cy2, width: dw2, height: cH, rx: 2, fill: chunk.color, opacity: '0.9' }));
+        const fSize = cH > 14 ? 9 : 7;
+        const ct = svgNS('text', { x: bx+4+dw2/2, y: cy2+cH/2+fSize*0.35, 'text-anchor':'middle', fill:'white', 'font-size':String(fSize), 'font-family':'JetBrains Mono, monospace', 'font-weight':'600' });
+        ct.textContent = chunk.label;
+        svg.appendChild(ct);
+      });
+    }
+
+    if (si < steps.length - 1) {
+      const ax1 = stepX + stepGroupW + 3, ax2 = stepX + stepGroupW + stepGap - 3;
+      const ay = 22 + stepGpuH/2;
+      svg.appendChild(svgNS('line', { x1: ax1, y1: ay, x2: ax2, y2: ay, stroke:'#3B5A7A', 'stroke-width':1.5, 'marker-end':'url(#ah-dim)' }));
+    }
+  });
+
+  document.getElementById('d-ring-ag').appendChild(svg);
+})();
+
+// ================================================================
+// DDP diagram
+// ================================================================
+(function() {
+  const W = 820, H = 210;
+  const svg = makeSVG(W, H);
+
+  const stages = [
+    { x: 10,  label: 'Same\nWeights', subtitle: 'init' },
+    { x: 190, label: 'Different\nGradients', subtitle: 'after backward' },
+    { x: 370, label: 'All-Reduce', subtitle: 'sync gradients', isComm: true },
+    { x: 550, label: 'Same\nGradients', subtitle: 'after all-reduce' },
+    { x: 730, label: 'Same\nWeights', subtitle: 'after step' },
+  ];
+
+  const gpuW = 62, gpuH = 70;
+  const gpuColors4 = [C.A, C.B, C.C, C.D];
+
+  stages.forEach((stage, si) => {
+    // Stage label
+    const lines = stage.label.split('\n');
+    lines.forEach((l, li) => {
+      const t = svgNS('text', { x: stage.x + (stage.isComm ? 60 : 2*gpuW+8)/2 + (stage.isComm ? 0 : 0), y: 14 + li*13, 'text-anchor':'middle', fill: stage.isComm ? '#60A5FA' : '#3B5A7A', 'font-size':'9', 'font-family':'JetBrains Mono, monospace' });
+      if (stage.isComm) t.setAttribute('x', stage.x+60);
+      t.textContent = l;
+      svg.appendChild(t);
+    });
+
+    const subT = svgNS('text', { x: stage.isComm ? stage.x+60 : stage.x + gpuW + 4, y: 200, 'text-anchor':'middle', fill:'#2A3F55', 'font-size':'8', 'font-family':'JetBrains Mono, monospace' });
+    subT.textContent = stage.subtitle;
+    svg.appendChild(subT);
+
+    if (stage.isComm) {
+      // Draw all-reduce symbol: double-headed arrow
+      const cx2 = stage.x + 60, mY = 110;
+      svg.appendChild(svgNS('circle', { cx: cx2, cy: mY, r: 28, fill: '#0A1525', stroke: '#1E3A60', 'stroke-width': 1.5 }));
+      const at = svgNS('text', { x: cx2, y: mY+5, 'text-anchor':'middle', fill:'#60A5FA', 'font-size':'11', 'font-family':'JetBrains Mono, monospace', 'font-weight':'600' });
+      at.textContent = 'ALL-\nREDUCE';
+      svg.appendChild(at);
+      const at2 = svgNS('text', { x: cx2, y: mY+4, 'text-anchor':'middle', fill:'#60A5FA', 'font-size':'9', 'font-family':'JetBrains Mono, monospace', 'font-weight':'600' });
+      at2.textContent = 'ALL-\nREDUCE';
+      svg.appendChild(at2);
+      // rewrite cleanly:
+      svg.removeChild(at);
+      svg.removeChild(at2);
+      const at3 = svgNS('text', { x: cx2, y: mY+4, 'text-anchor':'middle', fill:'#60A5FA', 'font-size':'10', 'font-family':'JetBrains Mono, monospace', 'font-weight':'600' });
+      at3.textContent = 'Σ avg';
+      svg.appendChild(at3);
+
+    } else {
+      // Draw 2 GPU boxes side by side (just show 2 for space)
+      for (let ri = 0; ri < 2; ri++) {
+        const bx = stage.x + ri*(gpuW+6);
+        const by = 36;
+        svg.appendChild(svgNS('rect', { x: bx, y: by, width: gpuW, height: gpuH, rx: 5, fill: '#0C1420', stroke: '#1E3A55', 'stroke-width': 1.2 }));
+        svg.appendChild(svgNS('rect', { x: bx, y: by, width: gpuW, height: 15, rx: 5, fill: '#0F1E32' }));
+        svg.appendChild(svgNS('rect', { x: bx, y: by+9, width: gpuW, height: 6, fill: '#0F1E32' }));
+        const gl = svgNS('text', { x: bx+gpuW/2, y: by+11, 'text-anchor':'middle', fill:'#3A5268', 'font-size':'8', 'font-family':'JetBrains Mono, monospace' });
+        gl.textContent = `GPU ${ri}`;
+        svg.appendChild(gl);
+
+        // Chunk inside
+        const isDiff = si === 1;
+        const isSameGrad = si === 3;
+        const isSameW = si === 0 || si === 4;
+
+        let fill, lbl;
+        if (isSameW) { fill = '#1E4080'; lbl = 'W'; }
+        else if (isDiff) { fill = gpuColors4[ri]; lbl = ri===0 ? '∂L/∂W₀' : '∂L/∂W₁'; }
+        else if (isSameGrad) { fill = '#6D28D9'; lbl = 'Σ∂W'; }
+        else { fill = '#1E4080'; lbl = 'W'; }
+
+        svg.appendChild(svgNS('rect', { x: bx+4, y: by+18, width: gpuW-8, height: gpuH-22, rx: 3, fill }));
+        const ct = svgNS('text', { x: bx+gpuW/2, y: by+18+(gpuH-22)/2+4, 'text-anchor':'middle', fill:'white', 'font-size':'9', 'font-family':'JetBrains Mono, monospace', 'font-weight':'600' });
+        ct.textContent = lbl;
+        svg.appendChild(ct);
+      }
+    }
+
+    // Arrow to next
+    if (si < stages.length - 1) {
+      const nextStage = stages[si+1];
+      const x1 = stage.isComm ? stage.x + 92 : stage.x + 2*gpuW + 6 + 4;
+      const x2 = nextStage.isComm ? nextStage.x + 30 : nextStage.x - 4;
+      const ay = 70;
+      svg.appendChild(svgNS('line', { x1, y1: ay, x2, y2: ay, stroke: '#3B5A7A', 'stroke-width': 1.5, 'marker-end': 'url(#ah-dim)' }));
+    }
+  });
+
+  document.getElementById('d-ddp').appendChild(svg);
+})();
+
+// ================================================================
+// FSDP2 diagram: parameter lifecycle
+// ================================================================
+(function() {
+  const W = 780, H = 195;
+  const svg = makeSVG(W, H);
+
+  // Show 4 GPUs in each stage with different parameter states
+  const stages = [
+    { x: 0,   label: 'Stored\n(sharded)', chunks: [['A'],['B'],['C'],['D']] },
+    { x: 210, label: 'All-Gather\n(fwd start)', chunks: [['ABCD'],['ABCD'],['ABCD'],['ABCD']], isComm: true },
+    { x: 410, label: 'Reduce-Scatter\n(bwd end)', chunks: [['ABCD'],['ABCD'],['ABCD'],['ABCD']], isComm: true },
+    { x: 600, label: 'Stored\n(grad shards)', chunks: [['SA'],['SB'],['SC'],['SD']] },
+  ];
+
+  const gw=38, gh=85, gg=4;
+  const gY=32;
+
+  stages.forEach((stage, si) => {
+    const isFirst = si===0, isLast=si===3;
+
+    // Stage label
+    stage.label.split('\n').forEach((l,li)=>{
+      const tx = stage.x + (2*gw+gg);
+      const t = svgNS('text',{x:tx,y:12+li*12,'text-anchor':'middle',fill:stage.isComm?'#60A5FA':'#3B5A7A','font-size':'9','font-family':'JetBrains Mono, monospace'});
+      t.textContent = l;
+      svg.appendChild(t);
+    });
+
+    // 4 GPUs (compact)
+    for(let ri=0;ri<4;ri++){
+      const bx = stage.x + (ri<2 ? ri*(gw+gg) : (ri===2 ? (ri-2)*(gw+gg) : (ri-2)*(gw+gg)));
+      const by = gY + (ri<2 ? 0 : gh+8);
+      // actually: 2x2 grid
+      const col = ri % 2, row = Math.floor(ri/2);
+      const gx = stage.x + col*(gw+gg);
+      const gy2 = gY + row*(gh+8);
+
+      svg.appendChild(svgNS('rect',{x:gx,y:gy2,width:gw,height:gh,rx:4,fill:'#0C1420',stroke:'#1E3A55','stroke-width':1.2}));
+      svg.appendChild(svgNS('rect',{x:gx,y:gy2,width:gw,height:13,rx:4,fill:'#0F1E32'}));
+      svg.appendChild(svgNS('rect',{x:gx,y:gy2+7,width:gw,height:6,fill:'#0F1E32'}));
+      const gl=svgNS('text',{x:gx+gw/2,y:gy2+10,'text-anchor':'middle',fill:'#3A5268','font-size':'7','font-family':'JetBrains Mono, monospace'});
+      gl.textContent=`G${ri}`;svg.appendChild(gl);
+
+      // Chunk
+      const chunkData = stage.chunks[ri];
+      const dy2=gy2+15, dh2=gh-17, dw2=gw-6;
+      const nc=chunkData.length;
+      const cH=(dh2-nc+1)/nc;
+      chunkData.forEach((key,ci)=>{
+        const cy2=dy2+ci*(cH+1);
+        if(key==='ABCD'){
+          const sc=['A','B','C','D'],sh=cH/4;
+          sc.forEach((s,si2)=>{
+            svg.appendChild(svgNS('rect',{x:gx+3,y:cy2+si2*sh,width:dw2,height:sh,rx:1,fill:CHUNK_COLORS[s]}));
+          });
+        }else{
+          const color=CHUNK_COLORS[key]||'#1E3A55',label=CHUNK_LABELS[key]||key;
+          svg.appendChild(svgNS('rect',{x:gx+3,y:cy2,width:dw2,height:cH,rx:2,fill:color,opacity:'0.9'}));
+          const fSize=cH>20?9:7;
+          const ct=svgNS('text',{x:gx+3+dw2/2,y:cy2+cH/2+fSize*0.35,'text-anchor':'middle',fill:'white','font-size':String(fSize),'font-family':'JetBrains Mono, monospace','font-weight':'600'});
+          ct.textContent=label;svg.appendChild(ct);
+        }
+      });
+    }
+
+    // Arrow and label to next stage
+    if(si<stages.length-1){
+      const x1=stage.x+2*(gw+gg)-gg+6, x2=stages[si+1].x-8;
+      const ay=gY+gh/2;
+      svg.appendChild(svgNS('line',{x1,y1:ay,x2,y2:ay,stroke:stage.isComm||stages[si+1].isComm?'#60A5FA':'#3B5A7A','stroke-width':1.5,'marker-end':'url(#ah-blue)'}));
+      // Comm label
+      const commLabels=['All-Gather','fwd pass','Reduce-\nScatter'];
+      const clY=ay-8;
+      const cl=svgNS('text',{x:(x1+x2)/2,y:clY,'text-anchor':'middle',fill:'#3B5A7A','font-size':'8','font-family':'JetBrains Mono, monospace'});
+      cl.textContent=commLabels[si];svg.appendChild(cl);
+    }
+  });
+
+  document.getElementById('d-fsdp2').appendChild(svg);
+})();
+
+// ================================================================
+// TP basic diagram
+// ================================================================
+(function() {
+  const W = 780, H = 180;
+  const svg = makeSVG(W, H);
+
+  // Show: [Replicated Input] -> [W1 Colwise sharded] -> [Sharded output] -> [All-Reduce] -> [Replicated output]
+
+  const stages = [
+    { x:10,  label:'Input\n(replicated)', note:'same x on all GPUs' },
+    { x:170, label:'W1: Colwise\n(sharded)', note:'each GPU has different col shard' },
+    { x:360, label:'Partial\nOutput', note:'sharded on last dim' },
+    { x:510, label:'All-Reduce', isComm:true },
+    { x:630, label:'Full\nOutput', note:'same result on all GPUs' },
+  ];
+
+  stages.forEach((s,si)=>{
+    s.label.split('\n').forEach((l,li)=>{
+      const t=svgNS('text',{x:s.x+(s.isComm?30:60),y:12+li*12,'text-anchor':'middle',fill:s.isComm?'#60A5FA':'#3B5A7A','font-size':'9','font-family':'JetBrains Mono, monospace'});
+      t.textContent=l;svg.appendChild(t);
+    });
+    if(s.note){
+      const nt=svgNS('text',{x:s.x+60,y:168,'text-anchor':'middle',fill:'#243448','font-size':'8','font-family':'JetBrains Mono, monospace'});
+      nt.textContent=s.note;svg.appendChild(nt);
+    }
+
+    if(s.isComm){
+      // All-reduce symbol
+      const cx2=s.x+30, mY=100;
+      svg.appendChild(svgNS('circle',{cx:cx2,cy:mY,r:24,fill:'#0A1525',stroke:'#1E3A60','stroke-width':1.5}));
+      const at=svgNS('text',{x:cx2,y:mY+4,'text-anchor':'middle',fill:'#60A5FA','font-size':'9','font-family':'JetBrains Mono, monospace','font-weight':'600'});
+      at.textContent='Σ sum';svg.appendChild(at);
+    }else{
+      // 2 GPU boxes
+      const gw=52, gh=82, gg=6, gY=28;
+      const colors4 = [C.A, C.SUM];
+      const labels4 = ['x', 'x'];
+      const chunksByStage={
+        0:[[{color:'#1E4080',label:'x'}],[{color:'#1E4080',label:'x'}]],
+        1:[[{color:C.A,label:'W₀'}],[{color:C.B,label:'W₁'}]],
+        2:[[{color:C.A,label:'out₀'}],[{color:C.B,label:'out₁'}]],
+        4:[[{color:'#6D28D9',label:'Σ'}],[{color:'#6D28D9',label:'Σ'}]],
+      };
+      const chunks=chunksByStage[si]||[[{color:'#1E3A55',label:'?'}],[{color:'#1E3A55',label:'?'}]];
+      for(let ri=0;ri<2;ri++){
+        const bx=s.x+ri*(gw+gg), by=gY;
+        svg.appendChild(svgNS('rect',{x:bx,y:by,width:gw,height:gh,rx:5,fill:'#0C1420',stroke:'#1E3A55','stroke-width':1.2}));
+        svg.appendChild(svgNS('rect',{x:bx,y:by,width:gw,height:15,rx:5,fill:'#0F1E32'}));
+        svg.appendChild(svgNS('rect',{x:bx,y:by+9,width:gw,height:6,fill:'#0F1E32'}));
+        const gl=svgNS('text',{x:bx+gw/2,y:by+11,'text-anchor':'middle',fill:'#3A5268','font-size':'8','font-family':'JetBrains Mono, monospace'});
+        gl.textContent=`GPU ${ri}`;svg.appendChild(gl);
+        const c=chunks[ri][0];
+        svg.appendChild(svgNS('rect',{x:bx+4,y:by+18,width:gw-8,height:gh-22,rx:3,fill:c.color,opacity:'0.9'}));
+        const ct=svgNS('text',{x:bx+gw/2,y:by+18+(gh-22)/2+4,'text-anchor':'middle',fill:'white','font-size':'11','font-family':'JetBrains Mono, monospace','font-weight':'600'});
+        ct.textContent=c.label;svg.appendChild(ct);
+      }
+    }
+
+    if(si<stages.length-1){
+      const ns2=stages[si+1];
+      const x1=s.isComm?s.x+56:s.x+2*52+6+6;
+      const x2=ns2.isComm?ns2.x+6:ns2.x-6;
+      const ay=gY=28;
+      const arrowY=70;
+      svg.appendChild(svgNS('line',{x1,y1:arrowY,x2,y2:arrowY,stroke:'#3B5A7A','stroke-width':1.5,'marker-end':'url(#ah-dim)'}));
+    }
+  });
+
+  document.getElementById('d-tp-basic').appendChild(svg);
+})();
+
+// ================================================================
+// TP Sequence Parallel diagram
+// ================================================================
+(function() {
+  const W = 780, H = 200;
+  const svg = makeSVG(W, H);
+
+  const stages = [
+    { x:10,  label:'Seq-sharded\nActivations', note:'[B, S/4, D] per GPU' },
+    { x:180, label:'RMSNorm\n(seq parallel)', note:'each GPU norms its slice' },
+    { x:350, label:'All-Gather', isComm:true, commLabel:'→ [B,S,D]' },
+    { x:470, label:'Attention\n(TP sharded)', note:'W_q/k/v colwise' },
+    { x:640, label:'Reduce-\nScatter', isComm:true, commLabel:'→ [B,S/4,D]' },
+  ];
+
+  const gw=52,gh=82,gg=6,gY=32;
+
+  const seqChunks = (rank) => {
+    const seqColors = [C.A,C.B,C.C,C.D];
+    return [{color:seqColors[rank],label:`S${rank}`}];
+  };
+
+  stages.forEach((s,si)=>{
+    s.label.split('\n').forEach((l,li)=>{
+      const t=svgNS('text',{x:s.x+(s.isComm?30:gw+gg/2),y:14+li*12,'text-anchor':'middle',fill:s.isComm?'#F97316':'#3B5A7A','font-size':'9','font-family':'JetBrains Mono, monospace'});
+      t.textContent=l;svg.appendChild(t);
+    });
+    if(s.note){
+      const nt=svgNS('text',{x:s.x+gw+gg/2,y:186,'text-anchor':'middle',fill:'#243448','font-size':'8','font-family':'JetBrains Mono, monospace'});
+      nt.textContent=s.note;svg.appendChild(nt);
+    }
+
+    if(s.isComm){
+      const cx2=s.x+30,mY=108;
+      svg.appendChild(svgNS('circle',{cx:cx2,cy:mY,r:24,fill:'#120A05',stroke:'#5A2E10','stroke-width':1.5}));
+      const at=svgNS('text',{x:cx2,y:mY+4,'text-anchor':'middle',fill:'#F97316','font-size':'8','font-family':'JetBrains Mono, monospace','font-weight':'600'});
+      at.textContent=si===2?'All-Gather':'Red-Scat';svg.appendChild(at);
+      if(s.commLabel){
+        const cl=svgNS('text',{x:cx2,y:mY+16,'text-anchor':'middle',fill:'#F97316','font-size':'7','font-family':'JetBrains Mono, monospace'});
+        cl.textContent=s.commLabel;svg.appendChild(cl);
+      }
+    }else{
+      // 2 GPU boxes
+      const allFull=si===3;
+      for(let ri=0;ri<2;ri++){
+        const bx=s.x+ri*(gw+gg),by=gY;
+        svg.appendChild(svgNS('rect',{x:bx,y:by,width:gw,height:gh,rx:5,fill:'#0C1420',stroke:'#1E3A55','stroke-width':1.2}));
+        svg.appendChild(svgNS('rect',{x:bx,y:by,width:gw,height:15,rx:5,fill:'#0F1E32'}));
+        svg.appendChild(svgNS('rect',{x:bx,y:by+9,width:gw,height:6,fill:'#0F1E32'}));
+        const gl=svgNS('text',{x:bx+gw/2,y:by+11,'text-anchor':'middle',fill:'#3A5268','font-size':'8','font-family':'JetBrains Mono, monospace'});
+        gl.textContent=`GPU ${ri}`;svg.appendChild(gl);
+
+        let fill,lbl;
+        if(si===0||si===1){fill=seqChunks(ri)[0].color;lbl=`S${ri}`;}
+        else if(si===3){fill=ri===0?C.A:C.B;lbl=ri===0?'W_q₀':'W_q₁';}
+        else{fill='#1E3A55';lbl='...';}
+
+        svg.appendChild(svgNS('rect',{x:bx+4,y:by+18,width:gw-8,height:gh-22,rx:3,fill,opacity:'0.9'}));
+        const ct=svgNS('text',{x:bx+gw/2,y:by+18+(gh-22)/2+4,'text-anchor':'middle',fill:'white','font-size':'11','font-family':'JetBrains Mono, monospace','font-weight':'600'});
+        ct.textContent=lbl;svg.appendChild(ct);
+      }
+    }
+
+    if(si<stages.length-1){
+      const ns2=stages[si+1];
+      const x1=s.isComm?s.x+56:s.x+2*gw+gg+6;
+      const x2=ns2.isComm?ns2.x+6:ns2.x-6;
+      const arrowY=gY+gh/2;
+      const color=s.isComm||ns2.isComm?'#F97316':'#3B5A7A';
+      const marker=s.isComm||ns2.isComm?'ah-orange':'ah-dim';
+      svg.appendChild(svgNS('line',{x1,y1:arrowY,x2,y2:arrowY,stroke:color,'stroke-width':1.5,'marker-end':`url(#${marker})`}));
+    }
+  });
+
+  document.getElementById('d-tp-sp').appendChild(svg);
+})();
+</script>
+
+</body>
+</html>
